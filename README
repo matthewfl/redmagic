@@ -1,0 +1,10 @@
+bochs instrumentation allows for recording all the instructions that are performed and no gui
+
+qemu in the target/ translate.c contains instructions to dispatch the x86 instrunctions
+
+parts of qemu are under difference licenses, so the code generator is bsd, and the target for i386 is lgpl
+
+base52 decoding mit licence from bitcoin
+
+
+qemu version dfa83a6bae960e3e3a3186264d75790cfd727bce 2.3.1
