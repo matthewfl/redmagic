@@ -17,7 +17,7 @@ CXX_FLAGS = (
     '-I ./deps/ '
     '-ggdb '
     '-O0 '
-    '-fopenmp '
+    '-I ./deps/udis86'
     # '-I /home/matthew/Downloads/bochs-code/bochs/cpu/ '
     # '-I /home/matthew/Downloads/bochs-code/bochs/ '
     # '-I /home/matthew/Downloads/bochs-code/bochs/instrument/stubs '
@@ -28,7 +28,8 @@ CXX_FLAGS_UNIT = (
     '-I ./src/ '
 )
 LIBS = (
-    '-pthread'
+    '-pthread '
+    'deps/udis86/libudis86/.libs/libudis86.a '
     # '/home/matthew/Downloads/bochs-code/bochs/cpu/libcpu.a '
     # '/home/matthew/Downloads/bochs-code/bochs/logio.o '
     # '/home/matthew/Downloads/bochs-code/bochs/cpu/fpu/libfpu.a '
@@ -42,6 +43,7 @@ CXX='g++'
 LD='g++'
 
 def build():
+    deps()
     compile()
     link()
 
@@ -54,9 +56,11 @@ def mic():
 def release():
     global CXX_FLAGS
     CXX_FLAGS = CXX_FLAGS.replace('-O0', '-O3')
+    CXX_FLAGS = CXX_FLAGS.replace('-ggdb', '')
     build()
 
 def clean():
+    Shell('cd deps/udis86 && make clean', shell=True)
     autoclean()
 
 def run():
@@ -103,10 +107,17 @@ def unit_link():
     after()
 
 def unit():
+    deps()
     unit_compile()
     compile()
     unit_link()
     Shell('./' + UNIT_TARGET)
+
+def deps():
+    # udis86 version 1.7.2
+    # TODO: make this auto build if not there
+    #Shell('cd deps/udis86 && ./configure && make', shell=True)
+    after()
 
 
 if __name__ == '__main__':
