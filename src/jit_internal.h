@@ -20,30 +20,113 @@
 
 #include <thread>
 #include <atomic>
+#include <map>
 
-#include <cstddef>
+#include <errno.h>
 
-#define container_of(ptr, type, member) ({                      \
-      const typeof( ((type *)0)->member ) *__mptr = (ptr);      \
-      (type *)( (char *)__mptr - offsetof(type,member) );})
+// #include <cstddef>
 
-typedef unsigned long long int register_type;
+// #define container_of(ptr, type, member) ({                      \
+//       const typeof( ((type *)0)->member ) *__mptr = (ptr);      \
+//       (type *)( (char *)__mptr - offsetof(type,member) );})
 
-struct redmagic_handle_t {
-  struct redmagic_thread_trace_t *head = nullptr;
-  pid_t child_pid;
+// typedef unsigned long long int register_type;
 
-  // hacky stuff to get things working....
-  register_type pc;
-  unsigned long read_offset;
-};
+// struct redmagic_handle_t {
+//   struct redmagic_thread_trace_t *head = nullptr;
+//   pid_t child_pid;
 
-struct redmagic_thread_trace_t {
-  struct redmagic_thread_trace_t *tail = nullptr;
-  std::thread manager;
-  pid_t pid;
-  std::atomic<int> flags;
-};
+//   // hacky stuff to get things working....
+//   register_type pc;
+//   unsigned long read_offset;
+
+
+// };
+
+
+#include "udis86.h"
+
+
+namespace redmagic {
+
+  class ChildManager;
+  class ParentManager;
+  class Tracer;
+
+  class ChildManager {
+  public:
+    void backwards_branch(void*);
+    void begin_trace();
+    void end_trace();
+
+    ChildManager(int send, int recv) : send_pipe(send), recv_pipe(recv) {}
+
+  private:
+    // TODO: use an atomic map here
+    std::map<void*, int> branch_count;
+    bool in_trace = false;
+    void *trace_branch;
+    int send_pipe, recv_pipe;
+  };
+
+  class ParentManager {
+  public:
+    void run();
+
+    ParentManager(int send, int recv, pid_t child): send_pipe(send), recv_pipe(recv), child_pid(child) {}
+
+  private:
+    int send_pipe, recv_pipe;
+    pid_t child_pid;
+    std::map<pid_t, Tracer*> tracers;
+  };
+
+  class Tracer {
+  public:
+    Tracer(ParentManager *man, pid_t pid); //: manager(man), thread_pid(pid) {}
+    void start();
+    pid_t getpid() { return thread_pid; }
+
+  private:
+    void run();
+
+  private:
+    ParentManager *manager;
+    const pid_t thread_pid;
+    std::thread running_thread;
+    bool exit = false;
+    ud_t disassm;
+    friend int udis_input_hook(ud_t*);
+    unsigned long read_offset;
+  };
+
+  extern ChildManager *child_manager;
+  extern ParentManager *parent_manager;
+
+  enum CommOp {
+    START_TRACE,
+    END_TRACE,
+  };
+
+  struct Communication_struct {
+    CommOp op;
+    pid_t thread_pid;
+
+  };
+
+
+
+}
+// struct redmagic_thread_trace_t {
+//   struct redmagic_thread_trace_t *tail = nullptr;
+//   std::thread manager;
+//   pid_t pid;
+//   std::atomic<int> flags;
+// };
+
+// global instance of red magic
+extern struct redmagic_handle_t *redmagic_global_default;
+
 
 
 #endif

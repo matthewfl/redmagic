@@ -1,3 +1,4 @@
+#if 0
 
 #include "redmagic.h"
 #include "jit_internal.h"
@@ -10,10 +11,10 @@ using namespace std;
 
 struct redmagic_handle_t *redmagic_global_default = nullptr;
 
-#define CHECK_GLOBAL(handle)                    \
-  if(handle == nullptr) {                       \
-    handle = redmagic_global_default;           \
-  }
+// #define CHECK_GLOBAL(handle)                    \
+//   if(handle == nullptr) {                       \
+//     handle = redmagic_global_default;           \
+//   }
 
 static int udis_input_hook(ud_t *obj) {
   // this method is suppose to only go forward one byte each time
@@ -27,7 +28,9 @@ static int udis_input_hook(ud_t *obj) {
   return res & 0xff;
 }
 
-extern "C" struct redmagic_handle_t *redmagic_init() {
+
+
+extern "C" void redmagic_start() {
   // auto r = new redmagic_handle_t;
   // if(redmagic_global_default == nullptr) {
   //   redmagic_global_default = r;
@@ -39,10 +42,10 @@ extern "C" struct redmagic_handle_t *redmagic_init() {
     // we are the child process
     ptrace(PTRACE_TRACEME, 0, NULL, NULL);
 
+    // allow for the parent processes to connect
     asm("int3");
 
-
-    return NULL;
+    return;// NULL;
   } else {
     auto r = new redmagic_handle_t;
     redmagic_global_default = r;
@@ -126,48 +129,50 @@ extern "C" struct redmagic_handle_t *redmagic_init() {
   }
 }
 
-extern "C" void redmagic_destroy(struct redmagic_handle_t *handle) {
-  CHECK_GLOBAL(handle);
-  if(redmagic_global_default == handle) {
-    redmagic_global_default = nullptr;
-  }
-  delete handle;
-}
+// extern "C" void redmagic_destroy(struct redmagic_handle_t *handle) {
+//   CHECK_GLOBAL(handle);
+//   if(redmagic_global_default == handle) {
+//     redmagic_global_default = nullptr;
+//   }
+//   delete handle;
+// }
 
-extern "C" redmagic_thread_trace_t* redmagic_start_trace(struct redmagic_handle_t *handle) {
-  CHECK_GLOBAL(handle);
-  auto r = new redmagic_thread_trace_t;
+// extern "C" redmagic_thread_trace_t* redmagic_start_trace(struct redmagic_handle_t *handle) {
+//   CHECK_GLOBAL(handle);
+//   auto r = new redmagic_thread_trace_t;
 
-  redmagic_thread_trace_t *prev_head;
-  do {
-    prev_head = handle->head;
-    r->tail = prev_head;
-    //handle->head = r;
-  } while(!__sync_bool_compare_and_swap(&handle->head, prev_head, r));
+//   redmagic_thread_trace_t *prev_head;
+//   do {
+//     prev_head = handle->head;
+//     r->tail = prev_head;
+//     //handle->head = r;
+//   } while(!__sync_bool_compare_and_swap(&handle->head, prev_head, r));
 
-  // get the pid of the current thread vs the processes
-  r->pid = syscall(__NR_gettid);
+//   // get the pid of the current thread vs the processes
+//   r->pid = syscall(__NR_gettid);
 
-  r->manager = std::thread([r](){
-      struct user_regs_struct regs;
-      cout << "requesting start with ptrace\n" << flush;
-      ptrace(PTRACE_ATTACH, r->pid, nullptr, nullptr);
-      r->flags |= 0x1;
-      waitpid(r->pid, NULL, 0);
-      cout << "subthread stopped\n" << flush;
-      long i = ptrace(PTRACE_GETREGS, r->pid, &regs, NULL);
-      cout << "sp:"<< regs.rsp << " " << regs.rip <<endl;
-    });
+//   r->manager = std::thread([r](){
+//       struct user_regs_struct regs;
+//       cout << "requesting start with ptrace\n" << flush;
+//       ptrace(PTRACE_ATTACH, r->pid, nullptr, nullptr);
+//       r->flags |= 0x1;
+//       waitpid(r->pid, NULL, 0);
+//       cout << "subthread stopped\n" << flush;
+//       long i = ptrace(PTRACE_GETREGS, r->pid, &regs, NULL);
+//       cout << "sp:"<< regs.rsp << " " << regs.rip <<endl;
+//     });
 
-  cout << "suspending: " << r->pid << endl << flush ;
+//   cout << "suspending: " << r->pid << endl << flush ;
 
-  //  kill(r->pid, SIGSTOP);
+//   //  kill(r->pid, SIGSTOP);
 
-  while((r->flags & 0x1) == 0) ;
-  cout << "resumed\n" << flush;
+//   while((r->flags & 0x1) == 0) ;
+//   cout << "resumed\n" << flush;
 
-  asm("int3");
+//   asm("int3");
 
-  // going to have to wait for the new thread to start tracing this thread
-  return r;
-}
+//   // going to have to wait for the new thread to start tracing this thread
+//   return r;
+// }
+
+#endif

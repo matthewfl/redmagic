@@ -11,11 +11,14 @@ using namespace std;
 int main(int argc, char* argv[]) {
 
   // will perform a fork internally
-  redmagic_init();
+  // to be called as early as possible
+  redmagic_start();
+
+  redmagic_force_begin_trace();
 
   cout << "asdf\n";
 
-  sleep(1);
+  sleep(10);
 
   asm("int3");
 
