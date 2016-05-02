@@ -5,22 +5,38 @@
 extern "C" {
 #endif
 
+#define REDMAGIC_NOINLINE __attribute__ ((noinline))
+
 
 // to be call as at the start of main
-void redmagic_start();
+void REDMAGIC_NOINLINE redmagic_start();
 
 // indicates that we have a backwards branch somewhere, determine if worth tracing
-void redmagic_backwards_branch(void *);
+void REDMAGIC_NOINLINE redmagic_backwards_branch(void *);
 
 // control forcing an the JIT to start a trace of this thread
-void redmagic_force_begin_trace();
-void redmagic_force_end_trace();
+void REDMAGIC_NOINLINE redmagic_force_begin_trace();
+void REDMAGIC_NOINLINE redmagic_force_end_trace();
 
+
+// temporarly disable JIT in a given method
+// must have an accompany enable call for every disable otherwise the internal state may go wrong...
+void REDMAGIC_NOINLINE redmagic_temp_disable();
+void REDMAGIC_NOINLINE redmagic_temp_enable();
 
 
 #ifdef __cplusplus
 }
+
+class redmagic_disable {
+public:
+  redmagic_disable () { redmagic_temp_disable(); }
+  ~redmagic_disable() { redmagic_temp_enable(); }
+};
+
 #endif
+
+
 
 
 #endif // REDMAGIC_H_

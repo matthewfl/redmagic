@@ -56,3 +56,23 @@ void ParentManager::run() {
     }
   }
 }
+
+void ParentManager::set_program_pval(void* where, unsigned char what) {
+  auto f = program_map.find(where);
+  if(f != program_map.end()) {
+    if(f->second != what) {
+      perror("trying to set two different values for the program map");
+    }
+    return;
+  }
+  program_map.insert(make_pair(where, what));
+}
+
+int ParentManager::get_program_pval(void *where) {
+  auto f = program_map.find(where);
+  if(f == program_map.end()) {
+    // we were not able to find it
+    return -1;
+  }
+  return f->second;
+}

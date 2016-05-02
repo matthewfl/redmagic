@@ -12,7 +12,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/user.h>
-//#include <sys/reg.h>
+#include <sys/reg.h>
 
 #include <sys/syscall.h>
 
@@ -53,6 +53,12 @@ namespace redmagic {
   class ParentManager;
   class Tracer;
 
+  struct JumpTrace;
+  struct Communication_struct;
+  struct Check_struct;
+
+  typedef decltype(((struct user_regs_struct*)(NULL))->r15) register_t;
+
   class ChildManager {
   public:
     void backwards_branch(void*);
@@ -75,10 +81,13 @@ namespace redmagic {
 
     ParentManager(int send, int recv, pid_t child): send_pipe(send), recv_pipe(recv), child_pid(child) {}
 
+    void set_program_pval(void* where, unsigned char what);
+    int get_program_pval(void* where);
   private:
     int send_pipe, recv_pipe;
     pid_t child_pid;
     std::map<pid_t, Tracer*> tracers;
+    std::map<void*, unsigned char> program_map;
   };
 
   class Tracer {
@@ -89,6 +98,10 @@ namespace redmagic {
 
   private:
     void run();
+    Check_struct decode_instruction();
+
+    unsigned char readByte(void *where);
+    void writeByte(void *where, unsigned char b);
 
   private:
     ParentManager *manager;
@@ -98,6 +111,11 @@ namespace redmagic {
     ud_t disassm;
     friend int udis_input_hook(ud_t*);
     unsigned long read_offset;
+
+    unsigned int read_cache;
+    unsigned long read_cache_loc = -1;
+
+    unsigned int num_ins = 0;
   };
 
   extern ChildManager *child_manager;
@@ -108,12 +126,54 @@ namespace redmagic {
     END_TRACE,
   };
 
+  struct Check_struct {
+    // which register to check
+    // -1 if there is no need for a check
+    // -2 if this is not a branch instruction
+    int check_register;
+    bool check_memory;
+
+    union {
+      register_t register_value;
+      register_t memory_value;
+    };
+  };
+
+  struct JumpTrace {
+    register_t ins_pc;    // pc of where the instruction is located
+    register_t target_pc; // pc after the instruction executed
+    ud_mnemonic_code instruction;
+    struct Check_struct check;
+    // int check_register;
+    // register_t register_value;
+    // int instruction_len;
+  };
+
   struct Communication_struct {
     CommOp op;
     pid_t thread_pid;
-
+    union {
+      struct JumpTrace jump;
+    };
   };
 
+  enum Int3_action {
+    END_TRACE_ACT,
+    BEGIN_TRACE_ACT,
+    TEMP_DISABLE_ACT,
+    TEMP_ENABLE_ACT,
+
+    NO_ACT,
+
+    MAX_ACT,
+  };
+
+  struct Int3_location {
+    void (*location)();
+    Int3_action act;
+  };
+
+  extern const Int3_location action_table[];
 
 
 }
@@ -125,7 +185,7 @@ namespace redmagic {
 // };
 
 // global instance of red magic
-extern struct redmagic_handle_t *redmagic_global_default;
+//extern struct redmagic_handle_t *redmagic_global_default;
 
 
 

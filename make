@@ -40,6 +40,7 @@ LIBS = (
 )
 LD_FLAGS = ''
 CXX='g++'
+CC='gcc'
 LD='g++'
 
 def build():
@@ -88,6 +89,9 @@ def compile():
             f.replace('src', 'build').replace('.cc', '.o'),
             CXX=CXX
         ))
+    Run('{CC} -c src/asm.s -o build/asm.o'.format(
+        CC=CC
+    ))
     after()
 
 def unit_compile():
