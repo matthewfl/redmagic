@@ -6,6 +6,8 @@
 
 //#include <sys/time.h>
 
+#include <assert.h>
+
 #include <iostream>
 using namespace std;
 
@@ -172,14 +174,37 @@ void Tracer::run() {
     cerr << "unexpected state when beginning trace\n";
     ::exit(-1);
   }
+
+  // this should currently be in a raise sigstop state, so we want to continue
+
+#ifndef NDEBUG
+  // double check the register
+  struct user_regs_struct dcheck_regs;
+  if(ptrace(PTRACE_GETREGS, thread_pid, &dcheck_regs, &dcheck_regs) < 0) {
+      perror("failed to get regs");
+  }
+  // different internal raise?? I guess so can't directly check the memory addresses
+  // uint64_t dcheck_diff = (uint64_t)&raise - (uint64_t)dcheck_regs.rip;
+  // assert(dcheck_diff < 500);
+#endif
+
+  if((res = ptrace(PTRACE_CONT, thread_pid, SIGCONT, SIGCONT)) < 0) {
+    perror("failed cont1");
+  }
+  //res = waitpid(thread_pid, &stat, 0);
+
+  // now we should be on the int3 instrunction that follows the raise
+
   cout << "attached: " << res << " " << stat << endl << flush;
   while(!exit) {
-    if((res = ptrace(PTRACE_SINGLESTEP, thread_pid, NULL, NULL)) < 0) {
-      perror("failed single step");
-    }
-    // if(ptrace(PTRACE_CONT, thread_pid, NULL, NULL) < 0) {
-    //   cerr << "failed continue\n";
+    // if((res = ptrace(PTRACE_SINGLESTEP, thread_pid, NULL, NULL)) < 0) {
+    //   perror("failed single step");
     // }
+
+    // if((res = ptrace(PTRACE_CONT, thread_pid, NULL, NULL)) < 0) {
+    //   perror("failed cont");
+    // }
+
     res = waitpid(thread_pid, &stat, 0);
     // TODO: handle various states of this child process
     if(WIFEXITED(stat)) {
@@ -200,7 +225,7 @@ void Tracer::run() {
     Int3_action act = NO_ACT;
 
     read_offset = regs.rip;
-    int prev_asm_ins = manager->get_program_pval((void*)regs.rip);
+    int prev_asm_ins = manager->get_program_pval((mem_loc_t)regs.rip);
     if(prev_asm_ins == -1) {
       // then we don't have this location saved?
       int i = 0;
@@ -217,7 +242,7 @@ void Tracer::run() {
     } else {
       // invalidate the cache since we have to write back the correct byte
       read_cache_loc = -1;
-      writeByte((void*)regs.rip, (unsigned char)(prev_asm_ins & 0xff));
+      writeByte((mem_loc_t)regs.rip, (uint8_t)(prev_asm_ins & 0xff));
     }
     ud_set_pc(&disassm, regs.rip);
 
@@ -252,21 +277,25 @@ void Tracer::run() {
 
 
     // skip forward till we find the next instruction to
-    // while(ud_disassemble(&disassm) && (res = decode_instruction()) != -2)
-    //   ;
+    Check_struct cs;
+    while(ud_disassemble(&disassm)) {
+      cs = decode_instruction();
+      if(cs.check_register != -2)
+        break;
+    }
 
-    // if(res == -2) {
-    //   perror("have somehow hit the end of the decoding stream without finding some jump");
-    // }
+    mem_loc_t ins_loc = ud_insn_off(&disassm);
+    unsigned char replaced_dat = readByte(ins_loc);
 
+    if(replaced_dat == 0xCC) {
+      cerr << "the data that we are replacing is an int3??\n";
+      ::exit(1);
+    }
 
+    manager->set_program_pval(ins_loc, replaced_dat);
 
+    writeByte(ins_loc, (uint8_t)0xCC);
 
-
-
-    // // struct timeval time;
-
-    // // gettimeofday(&time, NULL);
 
     cout << "\t" << num_ins++ << " " <<
       //"\t[" << time.tv_sec << "." << time.tv_usec << "]\t" <<
@@ -360,6 +389,10 @@ Check_struct Tracer::decode_instruction() {
     return r;
   }
 
+  case UD_Iinvalid: {
+    cerr << "no idea: " << ud_insn_hex(&disassm) << endl;
+  }
+
   default: {
     // this is not an instruction that we care about
     Check_struct r;
@@ -379,15 +412,16 @@ Check_struct Tracer::decode_instruction() {
 }
 
 
-unsigned char Tracer::readByte(void* where) {
-  unsigned long w = (unsigned long)where;
-  long res = ptrace(PTRACE_PEEKDATA, thread_pid, w & ~0x3, NULL);
-  return (res >> (8 * (w & 0x3))) & 0xff;
+unsigned char Tracer::readByte(mem_loc_t where) {
+  long res = ptrace(PTRACE_PEEKDATA, thread_pid, where & ~0x3, NULL);
+  return (res >> (8 * (where & 0x3))) & 0xff;
 }
 
-void Tracer::writeByte(void* where, unsigned char b) {
-  unsigned long w = (unsigned long)w;
-  long res = ptrace(PTRACE_POKEDATA, thread_pid, w & ~0x3, NULL);
-
-
+void Tracer::writeByte(mem_loc_t where, uint8_t b) {
+  long res = ptrace(PTRACE_PEEKDATA, thread_pid, where & ~0x3, NULL);
+  res &= ~(0xff << (8 * (where & 0x3)));
+  res |= ((int)b) << (8 * (where & 0x3));
+  if(ptrace(PTRACE_POKEDATA, thread_pid, where & ~0x3, res) < 0) {
+    perror("failed to write byte");
+  }
 }

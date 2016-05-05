@@ -58,6 +58,7 @@ namespace redmagic {
   struct Check_struct;
 
   typedef decltype(((struct user_regs_struct*)(NULL))->r15) register_t;
+  typedef uint64_t mem_loc_t; // a memory location in the debugged program
 
   class ChildManager {
   public:
@@ -81,13 +82,13 @@ namespace redmagic {
 
     ParentManager(int send, int recv, pid_t child): send_pipe(send), recv_pipe(recv), child_pid(child) {}
 
-    void set_program_pval(void* where, unsigned char what);
-    int get_program_pval(void* where);
+    void set_program_pval(mem_loc_t where, uint8_t what);
+    int get_program_pval(mem_loc_t where);
   private:
     int send_pipe, recv_pipe;
     pid_t child_pid;
     std::map<pid_t, Tracer*> tracers;
-    std::map<void*, unsigned char> program_map;
+    std::map<mem_loc_t, uint8_t> program_map;
   };
 
   class Tracer {
@@ -100,8 +101,8 @@ namespace redmagic {
     void run();
     Check_struct decode_instruction();
 
-    unsigned char readByte(void *where);
-    void writeByte(void *where, unsigned char b);
+    unsigned char readByte(mem_loc_t where);
+    void writeByte(mem_loc_t where, uint8_t b);
 
   private:
     ParentManager *manager;

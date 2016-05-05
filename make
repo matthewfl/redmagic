@@ -119,8 +119,8 @@ def unit():
 
 def deps():
     # udis86 version 1.7.2
-    # TODO: make this auto build if not there
-    #Shell('cd deps/udis86 && ./configure && make', shell=True)
+    if not os.path.isfile('deps/udis86/libudis86/.libs/libudis86.a'):
+        Shell('cd deps/udis86 && ./configure && make', shell=True)
     after()
 
 

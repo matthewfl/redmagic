@@ -57,7 +57,7 @@ void ParentManager::run() {
   }
 }
 
-void ParentManager::set_program_pval(void* where, unsigned char what) {
+void ParentManager::set_program_pval(mem_loc_t where, uint8_t what) {
   auto f = program_map.find(where);
   if(f != program_map.end()) {
     if(f->second != what) {
@@ -68,7 +68,7 @@ void ParentManager::set_program_pval(void* where, unsigned char what) {
   program_map.insert(make_pair(where, what));
 }
 
-int ParentManager::get_program_pval(void *where) {
+int ParentManager::get_program_pval(mem_loc_t where) {
   auto f = program_map.find(where);
   if(f == program_map.end()) {
     // we were not able to find it
