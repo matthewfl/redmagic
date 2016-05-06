@@ -18,9 +18,9 @@ int main(int argc, char* argv[]) {
 
   cout << "asdf\n";
 
-  sleep(10);
+  sleep(2);
 
-  asm("int3");
+  //asm("int3");
 
   cout << "test123";
 

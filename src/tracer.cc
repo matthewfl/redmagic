@@ -222,6 +222,7 @@ void Tracer::run() {
     res = waitpid(thread_pid, &stat, 0);
     // TODO: handle various states of this child process
     if(WIFEXITED(stat)) {
+      ::exit(WEXITSTATUS(stat));
       return;
     }
 
@@ -235,6 +236,8 @@ void Tracer::run() {
       //   perror(
       // }
 
+      // TODO: something clever
+      ::exit(1);
     }
 
     // if(WTERMSIG(stat)) {
@@ -387,7 +390,7 @@ void Tracer::run() {
     // skip forward till we find the next instruction to
     /* Check_struct cs; */
     while(ud_disassemble(&disassm)) {
-      cout << "[" << ud_insn_off(&disassm) << "] " << ud_insn_asm(&disassm) << " " << ud_insn_hex(&disassm) <<  endl << flush;
+      cout << "[" << ud_insn_off(&disassm) << "] " << ud_insn_asm(&disassm) << "\t" << ud_insn_hex(&disassm) <<  endl << flush;
       cs = decode_instruction();
       if(cs.check_register != -2)
         break;
@@ -430,6 +433,8 @@ Check_struct Tracer::decode_instruction() {
   //int check_register = -1;
 
   Check_struct r = {0};
+  r.scale_register = -1;
+  r.check_register = -1;
 
   switch(ud_insn_mnemonic(&disassm)) {
   case UD_Ijo:
@@ -496,24 +501,43 @@ Check_struct Tracer::decode_instruction() {
   case UD_Icall: {
     // determine if a register or memory is being used
     // and if so which reigster
-    const ud_operand_t *opr = ud_insn_opr(&disassm, 0);
-    if(opr->type == UD_OP_JIMM) {
-      // this performs a call to a constant location
-      r.check_register = -1;
-      r.check_memory = false;
-      return r;
-    } else if(opr->type == UD_OP_REG) {
-      r.check_register = ud_register_to_sys(opr->base);
-      r.check_memory = false;
-      return r;
-    } else if(opr->type == UD_OP_MEM) {
-      r.check_register = ud_register_to_sys(opr->base);
-      r.check_memory = true;
-      assert(0);
-      return r;
+    int nopr = 0;
+    while(ud_insn_opr(&disassm, nopr) != NULL) nopr++;
+
+    if(nopr == 1) {
+      const ud_operand_t *opr = ud_insn_opr(&disassm, 0);
+      if(opr->type == UD_OP_JIMM) {
+        // this performs a call to a constant location
+        r.check_register = -1;
+        r.check_memory = false;
+        return r;
+      } else if(opr->type == UD_OP_REG) {
+        r.check_register = ud_register_to_sys(opr->base);
+        r.check_memory = false;
+        return r;
+      } else if(opr->type == UD_OP_MEM) {
+        r.check_register = ud_register_to_sys(opr->base);
+        r.check_memory = true;
+        switch(opr->offset) {
+        case 8:
+          r.memory_offset = opr->lval.sbyte;
+          break;
+        case 16:
+          r.memory_offset = opr->lval.sword;
+          break;
+        case 32:
+          r.memory_offset = opr->lval.sdword;
+          break;
+        case 64:
+          r.memory_offset = opr->lval.sqword;
+        }
+        return r;
+      } else {
+        perror("what type is this??");
+        break;
+      }
     } else {
-      perror("what type is this??");
-      break;
+      assert(0);
     }
   }
 

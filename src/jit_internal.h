@@ -136,7 +136,10 @@ namespace redmagic {
     // -2 if this is not a branch instruction
     int check_register;
     bool check_memory;
+    // second register that represents that we are scaling memory_offset by some value, otherwise if -1, then scale memory_offset by -1
+    int scale_register;
     mem_loc_t memory_offset;
+    // check_register + scale_register * memory_offset
 
     union {
       register_t register_value;
