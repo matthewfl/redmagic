@@ -120,7 +120,7 @@ def unit():
 def deps():
     # udis86 version 1.7.2
     if not os.path.isfile('deps/udis86/libudis86/.libs/libudis86.a'):
-        Shell('cd deps/udis86 && ./configure && make', shell=True)
+        Shell('cd deps/udis86 && ./autogen.sh && PYTHON=`which python2` ./configure --enable-static && make', shell=True)
     after()
 
 
