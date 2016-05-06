@@ -3,12 +3,16 @@
 #include <iostream>
 using namespace std;
 
+#include <assert.h>
+
 using namespace redmagic;
 
 namespace redmagic {
   ChildManager *child_manager = nullptr;
   thread_local bool is_traced = false;
   thread_local bool is_temp_disabled = false;
+  thread_local bool is_running_compiled = false;
+  thread_local mem_loc_t return_disable_loc = 0;
 }
 
 static pid_t gettid() {
@@ -53,7 +57,14 @@ namespace redmagic {
 
 extern "C" void __attribute__ ((optimize("O0"))) redmagic_temp_disable() {
   if(is_traced) {
+    // the rax register will contain an address that we can jump to when this thing is compiled
+    __asm__("" ::: "%rax");
     red_asm_temp_disable_trace();
+    __asm__("mov %%rax, %[a] \n"
+            : [a]"=r" (return_disable_loc)
+            :
+            :
+            );
   }
   if(is_temp_disabled) {
     perror("can't temporarly disable the jit twice in a row");
@@ -62,6 +73,16 @@ extern "C" void __attribute__ ((optimize("O0"))) redmagic_temp_disable() {
 }
 
 extern "C" void __attribute__ ((optimize("O0"))) redmagic_temp_enable() {
+  if(is_running_compiled) {
+    // then we should have a location to jump back to
+    mem_loc_t m = return_disable_loc;
+    return_disable_loc = 0;
+    __asm__("jmp *%[a] \n"
+            :
+            : [a]"r" (m)
+            :
+            );
+  }
   if(!is_temp_disabled) {
     perror("can't renable trace when it isn't disabled");
   }
@@ -108,5 +129,28 @@ void ChildManager::end_trace() {
   }
   red_asm_end_trace();
   is_traced = false;
+
+  cerr << "requesting trace\n" << flush;
+
+  Communication_struct msg;
+  msg.thread_pid = gettid();
+  msg.op = END_TRACE;
+  if(write(send_pipe, &msg, sizeof(msg)) != sizeof(msg)) {
+    perror("failed to write end msg");
+  }
+
+  Communication_struct res;
+  read(recv_pipe, &res, sizeof(res));
+  assert(res.op == SEND_TRACE);
+  assert(res.thread_pid == msg.thread_pid);
+  vector<JumpTrace> vec;
+  vec.resize(res.number_jump_steps);
+
+  size_t len = sizeof(JumpTrace) * res.number_jump_steps;
+  if(read(recv_pipe, vec.data(), len) != len) {
+    perror("failed to read the trace steps");
+  }
+
+
 
 }

@@ -21,6 +21,7 @@ int main(int argc, char* argv[]) {
   sleep(2);
 
   char *a = (char*)malloc(1000);
+  *a = 1;
 
   //asm("int3");
 

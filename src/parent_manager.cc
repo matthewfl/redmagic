@@ -51,7 +51,18 @@ void ParentManager::run() {
       break;
     }
     case END_TRACE: {
-      assert(0); // TODO:
+      cerr << "got req to end trace\n" << flush;
+      auto t = tracers[msg.thread_pid];
+      Communication_struct rm;
+      rm.op = SEND_TRACE;
+      rm.thread_pid = msg.thread_pid;
+      rm.number_jump_steps = t->getSteps();
+      if(write(send_pipe, &msg, sizeof(msg)) != sizeof(msg)) {
+        perror("failed to send msg");
+      }
+      t->writeTrace(send_pipe);
+
+      break;
     }
     }
   }

@@ -406,7 +406,7 @@ void Tracer::run() {
 
     if(jtrace.instruction == UD_Icall) {
       // check if we are in a method call that we want to ignore
-      if(manager->is_ignored_method(new_pc) || new_pc == (register_t)&strcmp) {
+      if(manager->is_ignored_method(new_pc) || new_pc == (register_t)&malloc) {
         // this is an ignored method
         register_t sp = ptrace(PTRACE_PEEKUSER, thread_pid, RSP * sizeof(register_t), NULL);
         after_method_call_pc = ptrace(PTRACE_PEEKDATA, thread_pid, sp, NULL);
@@ -475,8 +475,9 @@ void Tracer::run() {
   }
 
  end_tracing:
-  if(ptrace(PTRACE_CONT, thread_pid, NULL, NULL) < 0) {
-    perror("failed to continue trace after finished");
+
+  if(ptrace(PTRACE_DETACH, thread_pid, NULL, NULL) < 0) {
+    perror("failed to detach ptrace");
   }
 
   cout << "finished the trace\n";
@@ -665,4 +666,17 @@ void Tracer::writeByte(mem_loc_t where, uint8_t b) {
 void Tracer::setOffset(mem_loc_t where) {
   read_offset = where;
   ud_set_pc(&disassm, where);
+}
+
+
+int Tracer::getSteps() {
+  return traces.size();
+}
+
+void Tracer::writeTrace(int fn) {
+  char *buf = (char*)traces.data();
+  size_t len = traces.size() * sizeof(JumpTrace);
+  if(write(fn, buf, len) != len) {
+    perror("failed to write the trace");
+  }
 }

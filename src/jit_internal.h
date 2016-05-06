@@ -100,6 +100,9 @@ namespace redmagic {
     Tracer(ParentManager *man, pid_t pid); //: manager(man), thread_pid(pid) {}
     void start();
     pid_t getpid() { return thread_pid; }
+    int getSteps();
+    void writeTrace(int fn);
+
 
   private:
     void run();
@@ -183,7 +186,8 @@ namespace redmagic {
     CommOp op;
     pid_t thread_pid;
     union {
-      struct JumpTrace jump;
+      int number_jump_steps;
+      //struct JumpTrace jump;
     };
   };
 

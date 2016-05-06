@@ -3,6 +3,7 @@
   .global   red_asm_temp_disable_trace
 red_asm_temp_disable_trace:
   int3
+  xor %rax, %rax # zero register
   ret
 
   .global   red_asm_temp_enable_trace
