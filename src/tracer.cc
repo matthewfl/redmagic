@@ -124,15 +124,15 @@ namespace redmagic {
     unsigned long loc = trace->read_offset++;
 
     // TODO: this looks like it can return 8 bytes at a time
-    if(trace->read_cache_loc == loc & ~0x3) {
+    if(trace->read_cache_loc == loc & ~0x7) {
       // then we can just read the bytes from the cache
-      return (trace->read_cache >> (8 * (loc & 0x3))) & 0xff;
+      return (trace->read_cache >> (8 * (loc & 0x7))) & 0xff;
     }
 
-    long res = ptrace(PTRACE_PEEKDATA, trace->thread_pid, loc & ~0x3, NULL);
-    trace->read_cache_loc = loc & ~0x3;
+    long res = ptrace(PTRACE_PEEKDATA, trace->thread_pid, loc & ~0x7, NULL);
+    trace->read_cache_loc = loc & ~0x7;
     trace->read_cache = res;
-    int r = (res >> (8 * (loc & 0x3))) & 0xff;
+    int r = (res >> (8 * (loc & 0x7))) & 0xff;
     return r;
 
   }
@@ -224,6 +224,23 @@ void Tracer::run() {
     if(WIFEXITED(stat)) {
       return;
     }
+
+    cerr << WIFEXITED(stat) << " " << WEXITSTATUS(stat) << " " << WIFSIGNALED(stat) << " " << WTERMSIG(stat) << " " << WIFSTOPPED(stat) << " " <<
+      WSTOPSIG(stat) << " " << WIFCONTINUED(stat) << endl << flush;
+
+
+    if(WSTOPSIG(stat) != SIGTRAP) {
+      // then this is not the trap instruction that we are looking for
+      // if(ptrace(PTRACE_CONT, thread_pid, NULL, NULL) < 0) {
+      //   perror(
+      // }
+
+    }
+
+    // if(WTERMSIG(stat)) {
+    //   assert(0);
+    // }
+
 
     // by getting the whole struct we are avoiding more than 1 syscall
     // not sure if this is an advantage?
@@ -370,6 +387,7 @@ void Tracer::run() {
     // skip forward till we find the next instruction to
     /* Check_struct cs; */
     while(ud_disassemble(&disassm)) {
+      cout << "[" << ud_insn_off(&disassm) << "] " << ud_insn_asm(&disassm) << " " << ud_insn_hex(&disassm) <<  endl << flush;
       cs = decode_instruction();
       if(cs.check_register != -2)
         break;
@@ -465,11 +483,12 @@ Check_struct Tracer::decode_instruction() {
         return r;
       }
       // TODO: check that this is the right thing to do
+      r.check_memory = true;
       r.memory_offset = opr->lval.uqword;
+      return r;
     }
 
-      assert(0);
-    }
+    assert(0);
   }
 
     // jump instrunctions
@@ -490,6 +509,7 @@ Check_struct Tracer::decode_instruction() {
     } else if(opr->type == UD_OP_MEM) {
       r.check_register = ud_register_to_sys(opr->base);
       r.check_memory = true;
+      assert(0);
       return r;
     } else {
       perror("what type is this??");
@@ -534,18 +554,30 @@ Check_struct Tracer::decode_instruction() {
 
 
 unsigned char Tracer::readByte(mem_loc_t where) {
-  long res = ptrace(PTRACE_PEEKDATA, thread_pid, where & ~0x3, NULL);
-  return (res >> (8 * (where & 0x3))) & 0xff;
+  // long res = ptrace(PTRACE_PEEKDATA, thread_pid, where & ~0x7, NULL);
+  // return (res >> (8 * (where & 0x7))) & 0xff;
+
+  long res = ptrace(PTRACE_PEEKDATA, thread_pid, where, NULL);
+  return res & 0xff;
 }
 
 void Tracer::writeByte(mem_loc_t where, uint8_t b) {
+  assert(readByte(140737351968729 - 7) != 0);
   read_cache_loc = -1;
-  long res = ptrace(PTRACE_PEEKDATA, thread_pid, where & ~0x3, NULL);
-  res &= ~(0xff << (8 * (where & 0x3)));
-  res |= ((int)b) << (8 * (where & 0x3));
-  if(ptrace(PTRACE_POKEDATA, thread_pid, where & ~0x3, res) < 0) {
+  long ores = ptrace(PTRACE_PEEKDATA, thread_pid, where & ~0x7, NULL);
+  long res = ((long)b) << (8 * (where & 0x7)) | ((~(((long)0xff) << (8 * (where & 0x7)))) & ores);
+  if(ptrace(PTRACE_POKEDATA, thread_pid, where & ~0x7, res) < 0) {
     perror("failed to write byte");
   }
+
+#ifndef NDEBUG
+  long res2 = ptrace(PTRACE_PEEKDATA, thread_pid, where & ~0x7, NULL);
+  assert(res == res2);
+  long res3 = ptrace(PTRACE_PEEKDATA, thread_pid, where, NULL);
+  assert((uint8_t)(res3 & 0xff) == b);
+
+  assert(readByte(140737351968729 - 7) != 0);
+#endif
 }
 
 
