@@ -123,19 +123,17 @@ namespace redmagic {
 
     unsigned long loc = trace->read_offset++;
 
+    // TODO: this looks like it can return 8 bytes at a time
     if(trace->read_cache_loc == loc & ~0x3) {
       // then we can just read the bytes from the cache
       return (trace->read_cache >> (8 * (loc & 0x3))) & 0xff;
     }
 
-    long res = ptrace(PTRACE_PEEKDATA, trace->thread_pid, loc, NULL);
+    long res = ptrace(PTRACE_PEEKDATA, trace->thread_pid, loc & ~0x3, NULL);
     trace->read_cache_loc = loc & ~0x3;
     trace->read_cache = res;
-    return (res >> (8 * (loc & 0x3))) & 0xff;
-
-    // TODO: cache the result of this since we get 4 bytes at a time
-    // TODO: check that we are reading the correct byte and not off by 3
-    //return res & 0xff;
+    int r = (res >> (8 * (loc & 0x3))) & 0xff;
+    return r;
 
   }
 }
@@ -162,8 +160,16 @@ void Tracer::start() {
 
 
 void Tracer::run() {
-  cerr << "tracer running " << thread_pid << endl << flush;
+  // define vars up here so we can use goto
   int res, stat;
+  Check_struct reg_check;
+  JumpTrace jtrace;
+  register_t new_pc;
+  Check_struct cs;
+  mem_loc_t ins_loc;
+  unsigned char replaced_dat;
+
+  cerr << "tracer running " << thread_pid << endl << flush;
 
   if(ptrace(PTRACE_ATTACH, thread_pid, NULL, NULL) < 0) {
     perror("failed attach");
@@ -188,15 +194,23 @@ void Tracer::run() {
   // assert(dcheck_diff < 500);
 #endif
 
+  // have to single step it at least once otherwise it doesn't move on continue????????????????????????????????
+  if((res = ptrace(PTRACE_SINGLESTEP, thread_pid, NULL, NULL)) < 0) {
+    perror("failed single step");
+    ::exit(1);
+  }
+
+  res = waitpid(thread_pid, &stat, 0);
+
   if((res = ptrace(PTRACE_CONT, thread_pid, SIGCONT, SIGCONT)) < 0) {
     perror("failed cont1");
+    ::exit(1);
   }
-  //res = waitpid(thread_pid, &stat, 0);
 
   // now we should be on the int3 instrunction that follows the raise
 
   cout << "attached: " << res << " " << stat << endl << flush;
-  while(!exit) {
+  while(true) {
     // if((res = ptrace(PTRACE_SINGLESTEP, thread_pid, NULL, NULL)) < 0) {
     //   perror("failed single step");
     // }
@@ -208,7 +222,6 @@ void Tracer::run() {
     res = waitpid(thread_pid, &stat, 0);
     // TODO: handle various states of this child process
     if(WIFEXITED(stat)) {
-      exit = true;
       return;
     }
 
@@ -224,33 +237,89 @@ void Tracer::run() {
     // by default do the default action
     Int3_action act = NO_ACT;
 
-    read_offset = regs.rip;
-    int prev_asm_ins = manager->get_program_pval((mem_loc_t)regs.rip);
+    setOffset(((mem_loc_t)regs.rip) - 1);
+
+    //read_offset = ((mem_loc_t)regs.rip) - 1;
+    // what we previously had at this location
+    int prev_asm_ins = manager->get_program_pval(read_offset);
+    //ud_set_pc(&disassm, read_offset);
+
     if(prev_asm_ins == -1) {
       // then we don't have this location saved?
       int i = 0;
       while(action_table[i].location != NULL) {
         // determine what action we should take
-        if(action_table[i].location == (void*)regs.rip) {
+        // the memory location will be the position after the int3
+        if(action_table[i].location == (void*)read_offset) {
           // then we should take this action
           act = action_table[i].act;
           break;
         }
         i++;
       }
-
+      // what are we doing here
+      assert(act != NO_ACT);
     } else {
       // invalidate the cache since we have to write back the correct byte
-      read_cache_loc = -1;
-      writeByte((mem_loc_t)regs.rip, (uint8_t)(prev_asm_ins & 0xff));
+      // read_cache_loc = -1;
+      writeByte(read_offset, (uint8_t)(prev_asm_ins & 0xff));
+      // reset the location of the instruction pointer so that when we continue we will execute this instruction
+      if(ptrace(PTRACE_POKEUSER, thread_pid, sizeof(register_t) * RIP, read_offset) < 0) {
+        perror("failed to reset the instruction pointer");
+      }
     }
-    ud_set_pc(&disassm, regs.rip);
 
+    if(act != NO_ACT) {
+      switch(act) {
+      case BEGIN_TRACE_ACT: {
+        // set the next break point and continue the thread
+        // skip the int3 instruction since we want to keep that
+        if(!ud_disassemble(&disassm)) {
+          perror("failed to skip int3");
+          ::exit(1);
+        }
+        goto locate_next_replace_instruction;
+
+      }
+      case END_TRACE_ACT: {
+        // TODO:
+        exit(2);
+        break;
+      }
+      case TEMP_DISABLE_ACT: {
+        temp_disable = true;
+        goto continue_program;
+        break;
+      }
+      case TEMP_ENABLE_ACT: {
+        temp_disable = false;
+        if(!ud_disassemble(&disassm)) {
+          perror("failed to skip int3");
+          ::exit(1);
+        }
+
+        goto locate_next_replace_instruction;
+      }
+
+      }
+    }
+
+    if(temp_disable) {
+      // TODO: have to continue the loop
+      goto continue_program;
+    }
+
+    // record the instruction current state and where it ends up next
 
     if(!(res = ud_disassemble(&disassm))) {
       perror("failed to dissassm");
     }
-    Check_struct reg_check = decode_instruction();
+    /*Check_struct*/ reg_check = decode_instruction();
+    if(reg_check.check_register == -2) {
+      perror("this is not a branching instruction, something went wrong");
+      ::exit(1);
+
+    }
     if(reg_check.check_register >= 0) {
       if(reg_check.check_memory) {
         // the location in memory that we are interested in
@@ -272,20 +341,42 @@ void Tracer::run() {
       }
     }
 
+    /* JumpTrace jtrace; */
+    jtrace.check = reg_check;
+    jtrace.ins_pc = ud_insn_off(&disassm);
+    jtrace.instruction = ud_insn_mnemonic(&disassm);
+
+    if(ptrace(PTRACE_SINGLESTEP, thread_pid, NULL, NULL) < 0) {
+      perror("failed to single step a branching instruction");
+    }
+
+    res = waitpid(thread_pid, &stat, 0);
+
+    /*register_t*/ new_pc = ptrace(PTRACE_PEEKUSER, thread_pid, RIP * sizeof(register_t), NULL);
+    jtrace.target_pc = new_pc;
+
+    setOffset(new_pc);
+    // read_offset = new_pc;
+    // ud_set_pc(&disassm, new_pc);
+
+
 
     // TODO: save the check register and its value somewhere as well as the program counter
 
 
+  locate_next_replace_instruction: ;
+
+
     // skip forward till we find the next instruction to
-    Check_struct cs;
+    /* Check_struct cs; */
     while(ud_disassemble(&disassm)) {
       cs = decode_instruction();
       if(cs.check_register != -2)
         break;
     }
 
-    mem_loc_t ins_loc = ud_insn_off(&disassm);
-    unsigned char replaced_dat = readByte(ins_loc);
+    /*mem_loc_t*/ ins_loc = ud_insn_off(&disassm);
+    /*unsigned char*/ replaced_dat = readByte(ins_loc);
 
     if(replaced_dat == 0xCC) {
       cerr << "the data that we are replacing is an int3??\n";
@@ -297,9 +388,21 @@ void Tracer::run() {
     writeByte(ins_loc, (uint8_t)0xCC);
 
 
-    cout << "\t" << num_ins++ << " " <<
-      //"\t[" << time.tv_sec << "." << time.tv_usec << "]\t" <<
-      ud_insn_asm(&disassm) << endl;
+  continue_program:
+    // if(ptrace(PTRACE_SINGLESTEP, thread_pid, NULL, NULL) < 0) {
+    //   //
+    //   perror("failed to single step after interuppted");
+    // }
+    if(ptrace(PTRACE_CONT, thread_pid, NULL, NULL) < 0) {
+      perror("failed to continue program");
+    }
+
+
+    // cout << "\t" << num_ins++ << " " <<
+    //   //"\t[" << time.tv_sec << "." << time.tv_usec << "]\t" <<
+    //   ud_insn_asm(&disassm) << endl;
+
+
   }
 }
 
@@ -307,6 +410,8 @@ Check_struct Tracer::decode_instruction() {
 
   // register that should be check for this instrunction
   //int check_register = -1;
+
+  Check_struct r = {0};
 
   switch(ud_insn_mnemonic(&disassm)) {
   case UD_Ijo:
@@ -325,7 +430,6 @@ Check_struct Tracer::decode_instruction() {
   case UD_Ijge:
   case UD_Ijle:
   case UD_Ijg: {
-    Check_struct r;
     r.check_register = EFLAGS;
     r.check_memory = false;
     return r;
@@ -334,16 +438,38 @@ Check_struct Tracer::decode_instruction() {
   case UD_Ijecxz:
   case UD_Ijrcxz: {
     //check_register = RCX;
-    Check_struct r;
     r.check_register = RCX;
     r.check_memory = false;
     return r;
   }
   case UD_Ijmp: {
-    Check_struct r;
-    r.check_register = -1;
-    r.check_memory = false;
-    return r;
+    const ud_operand_t *opr = ud_insn_opr(&disassm, 0);
+    if(opr == NULL || opr->type == UD_OP_IMM || opr->type == UD_OP_JIMM) {
+      r.check_register = -1;
+      r.check_memory = false;
+      return r;
+    }
+    if(opr->type == UD_OP_REG) {
+      r.check_register = ud_register_to_sys(opr->base);
+      if(r.check_register == RIP) {
+        // then this is set to be a PIC instruction which we don't care about
+        r.check_register = -1;
+      }
+      r.check_memory = false;
+      return r;
+    }
+    if(opr->type == UD_OP_MEM) {
+      r.check_register = ud_register_to_sys(opr->base);
+      if(r.check_register == RIP) {
+        r.check_register = -1;
+        return r;
+      }
+      // TODO: check that this is the right thing to do
+      r.memory_offset = opr->lval.uqword;
+    }
+
+      assert(0);
+    }
   }
 
     // jump instrunctions
@@ -354,17 +480,14 @@ Check_struct Tracer::decode_instruction() {
     const ud_operand_t *opr = ud_insn_opr(&disassm, 0);
     if(opr->type == UD_OP_JIMM) {
       // this performs a call to a constant location
-      Check_struct r;
       r.check_register = -1;
       r.check_memory = false;
       return r;
     } else if(opr->type == UD_OP_REG) {
-      Check_struct r;
       r.check_register = ud_register_to_sys(opr->base);
       r.check_memory = false;
       return r;
     } else if(opr->type == UD_OP_MEM) {
-      Check_struct r;
       r.check_register = ud_register_to_sys(opr->base);
       r.check_memory = true;
       return r;
@@ -383,7 +506,7 @@ Check_struct Tracer::decode_instruction() {
   case UD_Iret:
   case UD_Iretf: {
     // TODO: check if we are performing a more complicated type of jump?
-    Check_struct r;
+    // TODO: there is a form of ret that takes an assembly instruction for poping a variable number of spaces on the stack http://repzret.org/p/repzret/
     r.check_register = -1;
     r.check_memory = false;
     return r;
@@ -395,14 +518,12 @@ Check_struct Tracer::decode_instruction() {
 
   default: {
     // this is not an instruction that we care about
-    Check_struct r;
     r.check_register = -2;
     r.check_memory = false;
     return r;
   }
   }
 
-  Check_struct r;
   r.check_register = -2;
   r.check_memory = false;
   return r;
@@ -418,10 +539,17 @@ unsigned char Tracer::readByte(mem_loc_t where) {
 }
 
 void Tracer::writeByte(mem_loc_t where, uint8_t b) {
+  read_cache_loc = -1;
   long res = ptrace(PTRACE_PEEKDATA, thread_pid, where & ~0x3, NULL);
   res &= ~(0xff << (8 * (where & 0x3)));
   res |= ((int)b) << (8 * (where & 0x3));
   if(ptrace(PTRACE_POKEDATA, thread_pid, where & ~0x3, res) < 0) {
     perror("failed to write byte");
   }
+}
+
+
+void Tracer::setOffset(mem_loc_t where) {
+  read_offset = where;
+  ud_set_pc(&disassm, where);
 }

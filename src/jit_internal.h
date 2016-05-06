@@ -103,18 +103,21 @@ namespace redmagic {
 
     unsigned char readByte(mem_loc_t where);
     void writeByte(mem_loc_t where, uint8_t b);
+    void setOffset(mem_loc_t where);
+
 
   private:
     ParentManager *manager;
     const pid_t thread_pid;
     std::thread running_thread;
-    bool exit = false;
+    //bool exit = false;
+    bool temp_disable = false;
     ud_t disassm;
     friend int udis_input_hook(ud_t*);
-    unsigned long read_offset;
+    mem_loc_t read_offset;
 
-    unsigned int read_cache;
-    unsigned long read_cache_loc = -1;
+    long read_cache;
+    mem_loc_t read_cache_loc = -1;
 
     unsigned int num_ins = 0;
   };
@@ -133,6 +136,7 @@ namespace redmagic {
     // -2 if this is not a branch instruction
     int check_register;
     bool check_memory;
+    mem_loc_t memory_offset;
 
     union {
       register_t register_value;
