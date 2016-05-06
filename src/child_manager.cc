@@ -19,19 +19,24 @@ extern "C" void redmagic_backwards_branch(void *id) {
   child_manager->backwards_branch(id);
 }
 
-extern "C" void redmagic_force_begin_trace() {
+extern "C" void redmagic_force_begin_trace(void *id) {
   child_manager->begin_trace();
 }
 
-extern "C" void redmagic_force_end_trace() {
+extern "C" void redmagic_force_end_trace(void *id) {
   child_manager->end_trace();
 }
 
+extern "C" void redmagic_force_jump_to_trace(void *id) {
+
+}
+
 extern "C" {
-  void red_asm_temp_disable_trace ();
-  void red_asm_temp_enable_trace ();
-  void red_asm_end_trace ();
-  void red_asm_begin_trace ();
+  void red_asm_temp_disable_trace();
+  void red_asm_temp_enable_trace();
+  void red_asm_end_trace();
+  void red_asm_begin_trace();
+  void red_asm_return_after_method_call();
 }
 
 namespace redmagic {
@@ -40,6 +45,7 @@ namespace redmagic {
     { red_asm_temp_enable_trace, TEMP_ENABLE_ACT },
     { red_asm_end_trace, END_TRACE_ACT },
     { red_asm_begin_trace, BEGIN_TRACE_ACT },
+    { red_asm_return_after_method_call, RETURN_FROM_METHOD_ACT },
     { NULL, MAX_ACT }
   };
 }
@@ -100,7 +106,7 @@ void ChildManager::end_trace() {
   if(!is_traced) {
     perror("ending trace when was not started\n");
   }
-  asm("act_end_trace: int3");
+  red_asm_end_trace();
   is_traced = false;
 
 }

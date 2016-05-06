@@ -15,8 +15,10 @@ void REDMAGIC_NOINLINE redmagic_start();
 void REDMAGIC_NOINLINE redmagic_backwards_branch(void *);
 
 // control forcing an the JIT to start a trace of this thread
-void REDMAGIC_NOINLINE redmagic_force_begin_trace();
-void REDMAGIC_NOINLINE redmagic_force_end_trace();
+void REDMAGIC_NOINLINE redmagic_force_begin_trace(void *);
+void REDMAGIC_NOINLINE redmagic_force_end_trace(void *);
+
+void REDMAGIC_NOINLINE redmagic_force_jump_to_trace(void *);
 
 
 // temporarly disable JIT in a given method

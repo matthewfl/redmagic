@@ -21,6 +21,8 @@
 #include <thread>
 #include <atomic>
 #include <map>
+#include <vector>
+#include <set>
 
 #include <errno.h>
 
@@ -84,11 +86,13 @@ namespace redmagic {
 
     void set_program_pval(mem_loc_t where, uint8_t what);
     int get_program_pval(mem_loc_t where);
+    bool is_ignored_method(mem_loc_t where);
   private:
     int send_pipe, recv_pipe;
     pid_t child_pid;
     std::map<pid_t, Tracer*> tracers;
     std::map<mem_loc_t, uint8_t> program_map;
+    std::set<mem_loc_t> ignored_methods;
   };
 
   class Tracer {
@@ -120,15 +124,12 @@ namespace redmagic {
     mem_loc_t read_cache_loc = -1;
 
     unsigned int num_ins = 0;
+
+    std::vector<JumpTrace> traces;
   };
 
   extern ChildManager *child_manager;
   extern ParentManager *parent_manager;
-
-  enum CommOp {
-    START_TRACE,
-    END_TRACE,
-  };
 
   struct Check_struct {
     // which register to check
@@ -147,7 +148,18 @@ namespace redmagic {
     };
   };
 
+  enum TraceOp {
+    // represents that this is a typical instruction
+    INST_TRACE_OP, // a standard jump instruction
+    INST_LOOP_TRACE_OP, // a jump that is backwards and will execute multiple times in a row, eg only wait to exit is for this branch to fall through
+    BEGIN_TRACE_OP, // pushed at the start of the tracing processes
+    END_TRACE_OP,
+    TEMP_BREAK_TRACE_OP, // temp_disable/enable method
+    IGNORED_CALL_TRACE_OP, // when there is a call like malloc or some other registered call, work around it instead of tracing through it
+  };
+
   struct JumpTrace {
+    TraceOp op;
     register_t ins_pc;    // pc of where the instruction is located
     register_t target_pc; // pc after the instruction executed
     ud_mnemonic_code instruction;
@@ -155,6 +167,16 @@ namespace redmagic {
     // int check_register;
     // register_t register_value;
     // int instruction_len;
+  };
+
+  enum CommOp {
+    // client ops
+    START_TRACE,
+    END_TRACE,
+
+    // parent ops
+    SEND_TRACE,
+
   };
 
   struct Communication_struct {
@@ -170,6 +192,7 @@ namespace redmagic {
     BEGIN_TRACE_ACT,
     TEMP_DISABLE_ACT,
     TEMP_ENABLE_ACT,
+    RETURN_FROM_METHOD_ACT,
 
     NO_ACT,
 

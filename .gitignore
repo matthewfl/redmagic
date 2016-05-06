@@ -1,3 +1,5 @@
 *.o
 jit-test
 .deps
+build/
+release/

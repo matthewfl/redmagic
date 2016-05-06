@@ -6,12 +6,18 @@
 
 //#include <sys/time.h>
 
+
 #include <assert.h>
 
 #include <iostream>
 using namespace std;
 
 using namespace redmagic;
+
+extern "C" {
+  void red_asm_return_after_method_call();
+}
+
 
 // convert a register from udis to sys/reg.h
 static int ud_register_to_sys(ud_type t) {
@@ -169,6 +175,9 @@ void Tracer::run() {
   mem_loc_t ins_loc;
   unsigned char replaced_dat;
 
+  mem_loc_t current_replaced_loc = -1;
+  mem_loc_t after_method_call_pc = -1;
+
   cerr << "tracer running " << thread_pid << endl << flush;
 
   if(ptrace(PTRACE_ATTACH, thread_pid, NULL, NULL) < 0) {
@@ -282,6 +291,7 @@ void Tracer::run() {
     } else {
       // invalidate the cache since we have to write back the correct byte
       // read_cache_loc = -1;
+      current_replaced_loc = -1;
       writeByte(read_offset, (uint8_t)(prev_asm_ins & 0xff));
       // reset the location of the instruction pointer so that when we continue we will execute this instruction
       if(ptrace(PTRACE_POKEUSER, thread_pid, sizeof(register_t) * RIP, read_offset) < 0) {
@@ -303,13 +313,23 @@ void Tracer::run() {
       }
       case END_TRACE_ACT: {
         // TODO:
-        exit(2);
-        break;
+        if(current_replaced_loc != -1) {
+          int prev_asm_ins = manager->get_program_pval(current_replaced_loc);
+          assert(prev_asm_ins != -1);
+          writeByte(current_replaced_loc, (uint8_t)(prev_asm_ins & 0xff));
+          current_replaced_loc = -1;
+        }
+        goto end_tracing;
       }
       case TEMP_DISABLE_ACT: {
         temp_disable = true;
+        if(current_replaced_loc != -1) {
+          int prev_asm_ins = manager->get_program_pval(current_replaced_loc);
+          assert(prev_asm_ins != -1);
+          writeByte(current_replaced_loc, (uint8_t)(prev_asm_ins & 0xff));
+          current_replaced_loc = -1;
+        }
         goto continue_program;
-        break;
       }
       case TEMP_ENABLE_ACT: {
         temp_disable = false;
@@ -320,7 +340,15 @@ void Tracer::run() {
 
         goto locate_next_replace_instruction;
       }
-
+      case RETURN_FROM_METHOD_ACT: {
+        // returned from a method that we were not tracing
+        setOffset(after_method_call_pc);
+        if(ptrace(PTRACE_POKEUSER, thread_pid, sizeof(register_t) * RIP, after_method_call_pc) < 0) {
+          perror("failed to set rip after intercepted method return");
+        }
+        after_method_call_pc = -1;
+        goto locate_next_replace_instruction;
+      }
       }
     }
 
@@ -362,6 +390,7 @@ void Tracer::run() {
     }
 
     /* JumpTrace jtrace; */
+    jtrace.op = INST_TRACE_OP;
     jtrace.check = reg_check;
     jtrace.ins_pc = ud_insn_off(&disassm);
     jtrace.instruction = ud_insn_mnemonic(&disassm);
@@ -374,6 +403,23 @@ void Tracer::run() {
 
     /*register_t*/ new_pc = ptrace(PTRACE_PEEKUSER, thread_pid, RIP * sizeof(register_t), NULL);
     jtrace.target_pc = new_pc;
+
+    if(jtrace.instruction == UD_Icall) {
+      // check if we are in a method call that we want to ignore
+      if(manager->is_ignored_method(new_pc) || new_pc == (register_t)&strcmp) {
+        // this is an ignored method
+        register_t sp = ptrace(PTRACE_PEEKUSER, thread_pid, RSP * sizeof(register_t), NULL);
+        after_method_call_pc = ptrace(PTRACE_PEEKDATA, thread_pid, sp, NULL);
+        if(ptrace(PTRACE_POKEDATA, thread_pid, sp, &red_asm_return_after_method_call) < 0) {
+          perror("failed to set return address after ignored method");
+        }
+        goto continue_program;
+      }
+    }
+
+    // save this tracing operation
+    traces.push_back(jtrace);
+
 
     setOffset(new_pc);
     // read_offset = new_pc;
@@ -406,6 +452,8 @@ void Tracer::run() {
 
     manager->set_program_pval(ins_loc, replaced_dat);
 
+    assert(current_replaced_loc == -1);
+    current_replaced_loc = ins_loc;
     writeByte(ins_loc, (uint8_t)0xCC);
 
 
@@ -425,6 +473,15 @@ void Tracer::run() {
 
 
   }
+
+ end_tracing:
+  if(ptrace(PTRACE_CONT, thread_pid, NULL, NULL) < 0) {
+    perror("failed to continue trace after finished");
+  }
+
+  cout << "finished the trace\n";
+
+  // need to send the results of the traced back to the main running program
 }
 
 Check_struct Tracer::decode_instruction() {

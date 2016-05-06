@@ -13,15 +13,12 @@ TARGET = 'jit-test'
 UNIT_TARGET = 'build/unit_tests'
 
 CXX_FLAGS = (
+    '-fPIC '
     '-std=c++14 '
     '-I ./deps/ '
     '-ggdb '
     '-O0 '
-    '-I ./deps/udis86'
-    # '-I /home/matthew/Downloads/bochs-code/bochs/cpu/ '
-    # '-I /home/matthew/Downloads/bochs-code/bochs/ '
-    # '-I /home/matthew/Downloads/bochs-code/bochs/instrument/stubs '
-
+    '-I ./deps/udis86 '
 )
 CXX_FLAGS_UNIT = (
     '-I ./deps/catch/ '
@@ -29,13 +26,6 @@ CXX_FLAGS_UNIT = (
 )
 LIBS = (
     '-pthread '
-    'deps/udis86/libudis86/.libs/libudis86.a '
-    # '/home/matthew/Downloads/bochs-code/bochs/cpu/libcpu.a '
-    # '/home/matthew/Downloads/bochs-code/bochs/logio.o '
-    # '/home/matthew/Downloads/bochs-code/bochs/cpu/fpu/libfpu.a '
-    # '/home/matthew/Downloads/bochs-code/bochs/cpu/cpudb/libcpudb.a '
-    # '/home/matthew/Downloads/bochs-code/bochs/gui/libgui.a '
-
     # '-ljemalloc'
 )
 LD_FLAGS = ''
@@ -56,13 +46,19 @@ def mic():
 
 def release():
     global CXX_FLAGS
-    CXX_FLAGS = CXX_FLAGS.replace('-O0', '-O3')
+    CXX_FLAGS = CXX_FLAGS.replace('-O0', '-O2')
     CXX_FLAGS = CXX_FLAGS.replace('-ggdb', '')
+    CXX_FLAGS += ' -DNDEBUG'
     build()
+    Run('mkdir -p release')
+    Run('cp build/libredmagic.so.1.0.0 release/')
+    Run('cp src/redmagic.h release/')
+    Run('strip --strip-unneeded -w -K redmagic_* release/libredmagic.so.1.0.0')
+
 
 def clean():
-    Shell('cd deps/udis86 && make clean', shell=True)
     autoclean()
+    Shell('cd deps/udis86 && make clean', shell=True)
 
 def run():
     build()
@@ -75,8 +71,15 @@ def debug():
     ))
 
 def link():
-    objs = ' '.join(filter(lambda x: 'unit_' not in x, glob.glob('build/*.o')))
-    Run('{CXX} {LD_FLAGS} -o {TARGET} {objs} {LIBS}'.format(
+    objs = ' '.join(filter(lambda x: 'unit_' not in x and 'main.o' not in x, glob.glob('build/*.o')))
+    # Run('ar rcs build/redmagic.a {objs} {LIBRARY_LIBS}'.format(
+    #     **dict(globals(), **locals())
+    # ))
+    udis_libs = ' '.join(glob.glob('deps/udis86/libudis86/.libs/*.o'))
+    Run('{LD} -shared -fPIC -Wl,-soname,libredmagic.so.1.0.0 -o build/libredmagic.so.1.0.0 {objs} {udis_libs} {LIBS}'.format(
+        **dict(globals(), **locals())
+    ))
+    Run('{LD} {LD_FLAGS} -o {TARGET} build/main.o build/libredmagic.so.1.0.0 -Wl,-rpath=$ORIGIN/build/'.format(
         **dict(globals(), **locals())
     ))
     after()
@@ -119,8 +122,8 @@ def unit():
 
 def deps():
     # udis86 version 1.7.2
-    if not os.path.isfile('deps/udis86/libudis86/.libs/libudis86.a'):
-        Shell('cd deps/udis86 && ./autogen.sh && PYTHON=`which python2` ./configure --enable-static && make', shell=True)
+    if not os.path.isfile('deps/udis86/libudis86/.libs/libudis86.so') or not os.path.isfile('deps/udis86/libudis86/itab.h'):
+        Shell('cd deps/udis86 && ./autogen.sh && PYTHON=`which python2` ./configure && make', shell=True)
     after()
 
 

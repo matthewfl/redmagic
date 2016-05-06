@@ -76,3 +76,7 @@ int ParentManager::get_program_pval(mem_loc_t where) {
   }
   return f->second;
 }
+
+bool ParentManager::is_ignored_method(mem_loc_t where) {
+  return ignored_methods.find(where) != ignored_methods.end();
+}
