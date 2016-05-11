@@ -178,9 +178,7 @@ void Tracer::run() {
   mem_loc_t current_replaced_loc = -1;
   mem_loc_t after_method_call_pc = -1;
 
-  // cerr << "tracer running " << thread_pid << endl << flush;
-
-  printf("tracer running %i\n", thread_pid);
+  cerr << "tracer running " << thread_pid << endl << flush;
 
   if(ptrace(PTRACE_ATTACH, thread_pid, NULL, NULL) < 0) {
     perror("failed attach");
@@ -376,7 +374,10 @@ void Tracer::run() {
     if(reg_check.check_register >= 0) {
       if(reg_check.check_memory) {
         // the location in memory that we are interested in
+        // TODO: have to deal with offsets from memory addresses
         register_t rv = static_cast<register_t*>((void*)&regs)[reg_check.check_register];
+
+        // TODO: this can read 8 bytes so we don't need the second call
         // need to read the value out of memory
         union {
           register_t rr;
@@ -436,7 +437,7 @@ void Tracer::run() {
     // TODO: save the check register and its value somewhere as well as the program counter
 
 
-  locate_next_replace_instruction: ;
+  locate_next_replace_instruction:
 
 
     // skip forward till we find the next instruction to
@@ -482,6 +483,12 @@ void Tracer::run() {
 
  end_tracing:
 
+  if(ptrace(PTRACE_CONT, thread_pid, NULL, NULL) < 0) {
+    perror("failed to continue after done ptrace");
+  }
+
+  // this is suppose to continue the trace once detached
+  // however it seems to just leave the process in a frozen state
   if(ptrace(PTRACE_DETACH, thread_pid, NULL, NULL) < 0) {
     perror("failed to detach ptrace");
   }

@@ -137,7 +137,9 @@ void ChildManager::end_trace() {
   }
 
   Communication_struct res;
-  read(recv_pipe, &res, sizeof(res));
+  if(read(recv_pipe, &res, sizeof(res)) < sizeof(res)) {
+    perror("failed to read comm struct");
+  }
   assert(res.op == SEND_TRACE);
   assert(res.thread_pid == msg.thread_pid);
   vector<JumpTrace> vec;

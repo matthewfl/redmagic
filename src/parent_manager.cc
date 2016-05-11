@@ -57,6 +57,7 @@ void ParentManager::run() {
 
   while(1) {
     Communication_struct msg;
+    cerr << "waiting on read\n" << flush;
     read(recv_pipe, &msg, sizeof(msg));
     switch(msg.op) {
     case START_TRACE: {
@@ -74,7 +75,7 @@ void ParentManager::run() {
       rm.op = SEND_TRACE;
       rm.thread_pid = msg.thread_pid;
       rm.number_jump_steps = t->getSteps();
-      if(write(send_pipe, &msg, sizeof(msg)) != sizeof(msg)) {
+      if(write(send_pipe, &rm, sizeof(rm)) != sizeof(rm)) {
         perror("failed to send msg");
       }
       t->writeTrace(send_pipe);
@@ -133,18 +134,21 @@ pid_t ParentManager::waitpid(pid_t pid, int *stat) {
     switch_from = &current_thread->context;
   }
 
-  assert(current_thread == NULL || current_thread->tracer->getpid() == pid);
+  assert(current_thread == NULL || current_thread->tracer->getpid() == pid || (pid == -1 && stat == NULL));
 
  do_wait:
 
   cp.pid = wait(&cp.stat);
   if(pid == -1 && stat == NULL) {
     // this current thread is done, needs to be deleted
+    if(current_thread != NULL)
+      current_thread->pid = -1;
     delete_thread = current_thread;
   }
   if(errno == EINTR && cp.pid == -1) {
     // wait was interupted by some signal
     // then we are starting a new tracer thread
+    errno = 0;
     current_thread = head_thread;
     switch_to = &current_thread->context;
     cp.pid = current_thread->pid;
@@ -221,11 +225,12 @@ void ParentManager::start_child_cb(intptr_t ptr) {
 void ParentManager::start_child(pid_t pid) {
   using namespace boost::context;
   Tracer *t = new Tracer(this, pid);
+  tracers[pid] = t;
   struct waiting_thread *child = new waiting_thread;
-  // this method call right here is SO MUCH BULL SHIT, having to manually offset the stack -sizeof, this was not properly included in the docs....
+  // this method call right here is SO MUCH BULL SHIT, having to manually offset the stack +sizeof, this was not properly included in the docs....
   // I guess that this is the "lower level interface" but this seems to be what is documented well
   // using these function should be fairly fast since these are just a dozen assembly instructions each
-  child->context = make_fcontext(child->stack - sizeof(child->stack), sizeof(child->stack), start_child_cb);
+  child->context = make_fcontext(child->stack + sizeof(child->stack), sizeof(child->stack), start_child_cb);
   child->pid = pid;
   child->tracer = t;
   child->next = head_thread;
