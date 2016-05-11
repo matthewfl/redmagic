@@ -26,6 +26,8 @@
 
 #include <errno.h>
 
+#include <boost/context/all.hpp>
+
 // #include <cstddef>
 
 // #define container_of(ptr, type, member) ({                      \
@@ -87,25 +89,56 @@ namespace redmagic {
     void set_program_pval(mem_loc_t where, uint8_t what);
     int get_program_pval(mem_loc_t where);
     bool is_ignored_method(mem_loc_t where);
+
+    pid_t waitpid(pid_t pid, int *stat);
+  private:
+    void start_child(pid_t pid);
+    //    static void start_waitthread();
+    static void start_child_cb(intptr_t);
+
   private:
     int send_pipe, recv_pipe;
     pid_t child_pid;
     std::map<pid_t, Tracer*> tracers;
     std::map<mem_loc_t, uint8_t> program_map;
     std::set<mem_loc_t> ignored_methods;
+
+
+
+    struct waiting_thread {
+      unsigned long before_stack = 0xdeadbeef;
+      char stack[8192];
+      unsigned long after_stack = 0xdeadbeef;
+      pid_t pid;
+      boost::context::fcontext_t context;
+      struct waiting_thread *next;
+      Tracer *tracer;
+    };
+
+    boost::context::fcontext_t main_wait_context;
+    //boost::context::fcontext_t main_thread;
+
+    struct waiting_thread *current_thread = NULL;
+    struct waiting_thread *head_thread = NULL;
+    struct waiting_thread *delete_thread = NULL;
+
+    pid_t tracing_pid;
+
   };
 
   class Tracer {
+    unsigned long before_tracer = 0xdeadbeef;
   public:
     Tracer(ParentManager *man, pid_t pid); //: manager(man), thread_pid(pid) {}
-    void start();
+    //void start();
     pid_t getpid() { return thread_pid; }
     int getSteps();
     void writeTrace(int fn);
 
 
-  private:
     void run();
+
+  private:
     Check_struct decode_instruction();
 
     unsigned char readByte(mem_loc_t where);
@@ -129,6 +162,9 @@ namespace redmagic {
     unsigned int num_ins = 0;
 
     std::vector<JumpTrace> traces;
+
+    unsigned long after_tracer = 0xdeadbeef;
+
   };
 
   extern ChildManager *child_manager;
@@ -210,6 +246,10 @@ namespace redmagic {
 
   extern const Int3_location action_table[];
 
+
+static pid_t gettid() {
+  return syscall(__NR_gettid);
+}
 
 }
 // struct redmagic_thread_trace_t {

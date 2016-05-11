@@ -158,11 +158,11 @@ Tracer::Tracer(ParentManager *man, pid_t pid):
 
 }
 
-void Tracer::start() {
-  running_thread = std::thread([this](){
-      this->run();
-    });
-}
+// void Tracer::start() {
+//   running_thread = std::thread([this](){
+//       this->run();
+//     });
+// }
 
 
 void Tracer::run() {
@@ -178,13 +178,16 @@ void Tracer::run() {
   mem_loc_t current_replaced_loc = -1;
   mem_loc_t after_method_call_pc = -1;
 
-  cerr << "tracer running " << thread_pid << endl << flush;
+  // cerr << "tracer running " << thread_pid << endl << flush;
+
+  printf("tracer running %i\n", thread_pid);
 
   if(ptrace(PTRACE_ATTACH, thread_pid, NULL, NULL) < 0) {
     perror("failed attach");
   }
 
-  res = waitpid(thread_pid, &stat, WUNTRACED);
+  //res = waitpid(thread_pid, &stat, WUNTRACED);
+  res = manager->waitpid(thread_pid, &stat);
   if((res != thread_pid) || !(WIFSTOPPED(stat))) {
     cerr << "unexpected state when beginning trace\n";
     ::exit(-1);
@@ -209,7 +212,8 @@ void Tracer::run() {
     ::exit(1);
   }
 
-  res = waitpid(thread_pid, &stat, 0);
+  res = manager->waitpid(thread_pid, &stat);
+  //res = waitpid(thread_pid, &stat, 0);
 
   if((res = ptrace(PTRACE_CONT, thread_pid, SIGCONT, SIGCONT)) < 0) {
     perror("failed cont1");
@@ -228,7 +232,8 @@ void Tracer::run() {
     //   perror("failed cont");
     // }
 
-    res = waitpid(thread_pid, &stat, 0);
+    //res = waitpid(thread_pid, &stat, 0);
+    res = manager->waitpid(thread_pid, &stat);
     // TODO: handle various states of this child process
     if(WIFEXITED(stat)) {
       ::exit(WEXITSTATUS(stat));
@@ -399,7 +404,8 @@ void Tracer::run() {
       perror("failed to single step a branching instruction");
     }
 
-    res = waitpid(thread_pid, &stat, 0);
+    res = manager->waitpid(thread_pid, &stat);
+    //res = waitpid(thread_pid, &stat, 0);
 
     /*register_t*/ new_pc = ptrace(PTRACE_PEEKUSER, thread_pid, RIP * sizeof(register_t), NULL);
     jtrace.target_pc = new_pc;
@@ -481,6 +487,10 @@ void Tracer::run() {
   }
 
   cout << "finished the trace\n";
+
+  // indicate that we are done
+  // should not return
+  manager->waitpid(-1, NULL);
 
   // need to send the results of the traced back to the main running program
 }

@@ -14,6 +14,8 @@ int main(int argc, char* argv[]) {
   // to be called as early as possible
   redmagic_start();
 
+  sleep(1);
+
   redmagic_force_begin_trace((void*)123);
 
   cout << "asdf\n";

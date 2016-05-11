@@ -1,11 +1,17 @@
+/**
+ * Red Magic by Matthew Francis-Landau <matthew@matthewfl.com>
+ */
+
 #ifndef REDMAGIC_H_
 #define REDMAGIC_H_
+
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define REDMAGIC_NOINLINE __attribute__ ((noinline))
+#define REDMAGIC_NOINLINE
+  //__attribute__ ((noinline)) __attribute__ ((visibility ("default")))
 
 
 // to be call as at the start of main

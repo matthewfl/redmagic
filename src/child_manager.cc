@@ -15,9 +15,6 @@ namespace redmagic {
   thread_local mem_loc_t return_disable_loc = 0;
 }
 
-static pid_t gettid() {
-  return syscall(__NR_gettid);
-}
 
 extern "C" void redmagic_backwards_branch(void *id) {
   child_manager->backwards_branch(id);

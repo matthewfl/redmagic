@@ -26,6 +26,7 @@ CXX_FLAGS_UNIT = (
 )
 LIBS = (
     '-pthread '
+    '-Wl,-Bstatic -lboost_context -Wl,-Bdynamic '
     # '-ljemalloc'
 )
 LD_FLAGS = ''
@@ -45,10 +46,11 @@ def mic():
     LD = 'icpc'
 
 def release():
-    global CXX_FLAGS
+    global CXX_FLAGS, LD_FLAGS
     CXX_FLAGS = CXX_FLAGS.replace('-O0', '-O2')
     CXX_FLAGS = CXX_FLAGS.replace('-ggdb', '')
-    CXX_FLAGS += ' -DNDEBUG'
+    CXX_FLAGS += ' -DNDEBUG -fdata-sections -ffunction-sections -flto '
+    LD_FLAGS += '-flto '
     build()
     Run('mkdir -p release')
     Run('cp build/libredmagic.so.1.0.0 release/')
@@ -76,7 +78,7 @@ def link():
     #     **dict(globals(), **locals())
     # ))
     udis_libs = ' '.join(glob.glob('deps/udis86/libudis86/.libs/*.o'))
-    Run('{LD} -shared -fPIC -Wl,-soname,libredmagic.so.1.0.0 -o build/libredmagic.so.1.0.0 {objs} {udis_libs} {LIBS}'.format(
+    Run('{LD} {LD_FLAGS} -shared -fPIC -Wl,-soname,libredmagic.so.1.0.0 -o build/libredmagic.so.1.0.0 {objs} {udis_libs} {LIBS}'.format(
         **dict(globals(), **locals())
     ))
     Run('{LD} {LD_FLAGS} -o {TARGET} build/main.o build/libredmagic.so.1.0.0 -Wl,-rpath=$ORIGIN/build/'.format(
@@ -124,6 +126,8 @@ def deps():
     # udis86 version 1.7.2
     if not os.path.isfile('deps/udis86/libudis86/.libs/libudis86.so') or not os.path.isfile('deps/udis86/libudis86/itab.h'):
         Shell('cd deps/udis86 && ./autogen.sh && PYTHON=`which python2` ./configure && make', shell=True)
+    if not os.path.isfile('build'):
+        Shell('mkdir -p build')
     after()
 
 
