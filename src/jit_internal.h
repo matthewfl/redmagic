@@ -3,6 +3,8 @@
 
 #include "redmagic.h"
 
+#include "config.h"
+
 #ifndef __cplusplus
 #error "require c++ to compile red magic"
 #endif
@@ -61,6 +63,9 @@ namespace redmagic {
   struct Communication_struct;
   struct Check_struct;
 
+  class Compiler;
+  class CompilerBuffer;
+
   typedef decltype(((struct user_regs_struct*)(NULL))->r15) register_t;
   typedef uint64_t mem_loc_t; // a memory location in the debugged program
 
@@ -91,6 +96,7 @@ namespace redmagic {
     bool is_ignored_method(mem_loc_t where);
 
     pid_t waitpid(pid_t pid, int *stat);
+
   private:
     void start_child(pid_t pid);
     //    static void start_waitthread();
@@ -164,6 +170,10 @@ namespace redmagic {
     std::vector<JumpTrace> traces;
 
     unsigned long after_tracer = 0xdeadbeef;
+
+#ifdef CONF_COMPILE_IN_PARENT
+    friend class Compiler;
+#endif
 
   };
 

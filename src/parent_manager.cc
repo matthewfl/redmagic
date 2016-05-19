@@ -1,5 +1,9 @@
 #include "jit_internal.h"
 
+#ifdef CONF_COMPILE_IN_PARENT
+# include "compiler.h"
+#endif
+
 #include <assert.h>
 
 #include <iostream>
@@ -71,6 +75,9 @@ void ParentManager::run() {
     case END_TRACE: {
       cerr << "got req to end trace\n" << flush;
       auto t = tracers[msg.thread_pid];
+#ifdef CONF_COMPILE_IN_PARENT
+      auto c = new Compiler(t);
+#else
       Communication_struct rm;
       rm.op = SEND_TRACE;
       rm.thread_pid = msg.thread_pid;
@@ -79,7 +86,7 @@ void ParentManager::run() {
         perror("failed to send msg");
       }
       t->writeTrace(send_pipe);
-
+#endif
       break;
     }
     }

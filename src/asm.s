@@ -1,5 +1,9 @@
 # Assembly instructions that are needed
 
+  .global red_asm_compile_buff_near
+red_asm_compile_buff_near:
+  nop
+
   .global   red_asm_temp_disable_trace
 red_asm_temp_disable_trace:
   int3
