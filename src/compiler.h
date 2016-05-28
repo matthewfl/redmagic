@@ -29,21 +29,64 @@ namespace redmagic {
   };
 
   // output buffer for the compiler
-  class CompileBuffer final {
+  class CodeBuffer final {
   public:
-    CompileBuffer(size_t size);
-    ~CompileBuffer();
+    CodeBuffer(size_t size);
+#ifdef CONF_COMPILE_IN_PARENT
+    CodeBuffer(Tracer *tracer, mem_loc_t start, size_t size);
+#endif
+    CodeBuffer(mem_loc_t start, size_t size);
 
-    void *getBuffer() { return buffer; }
+    ~CodeBuffer();
+
+    //void *getBuffer() { return buffer; }
     size_t getSize() { return size; }
 
-  private:
+#ifdef CONF_COMPILE_IN_PARENT
+    uint8_t readByte(mem_loc_t offset);
+    void writeByte(mem_loc_t offset, uint8_t val);
+#else
+    inline uint8_t readByte(mem_loc_t offset) {
+      assert(offset < size);
+      return buffer[offset];
+    }
+    inline void writeByte(mem_loc_t offset, uint8_t val) {
+      assert(offset < size);
+      assert(can_write_buffer);
+      buffer[offset] = val;
+    }
+#endif
 
+  public:
+    // write another code buffer to the end of this one
+    void writeToEnd(CodeBuffer &other, long start=-1, long end=-1);
+
+  public:
+    ud_t disassm;
+  private:
+    static int udis_input_hook(ud_t *ud);
+    mem_loc_t ud_offset;
+    void init();
 
   private:
-    char *buffer;
+    uint8_t *buffer;
     size_t size;
+    size_t buffer_consumed;
+    bool owns_buffer;
+    bool can_write_buffer;
+#ifdef CONF_COMPILE_IN_PARENT
+    Tracer *_tracer;
+#endif
+    struct rebind_jumps {
+      mem_loc_t buffer_offset;
+      // suppose that this could disappear so might not be best idea to deallcate these and reallocate?
+      CodeBuffer *origional_buffer;
+      mem_loc_t origional_offset;
+    };
+    std::vector<rebind_jumps> jumps;
+
   };
+
 
 
 }

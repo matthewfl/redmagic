@@ -64,7 +64,7 @@ namespace redmagic {
   struct Check_struct;
 
   class Compiler;
-  class CompilerBuffer;
+  class CodeBuffer;
 
   typedef decltype(((struct user_regs_struct*)(NULL))->r15) register_t;
   typedef uint64_t mem_loc_t; // a memory location in the debugged program
@@ -173,6 +173,7 @@ namespace redmagic {
 
 #ifdef CONF_COMPILE_IN_PARENT
     friend class Compiler;
+    friend class CodeBuffer;
 #endif
 
   };

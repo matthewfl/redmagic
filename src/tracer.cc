@@ -605,6 +605,9 @@ Check_struct Tracer::decode_instruction() {
           break;
         case 64:
           r.memory_offset = opr->lval.sqword;
+          break;
+        default:
+          assert(0);
         }
         return r;
       } else {
