@@ -12,6 +12,8 @@ TARGET = 'jit-test'
 
 UNIT_TARGET = 'build/unit_tests'
 
+GIT_VERSION=Shell('git describe --always --long --dirty --abbrev=12', silent=True).strip()
+
 CXX_FLAGS = (
     '-fPIC '
     '-std=c++14 '
@@ -81,6 +83,7 @@ def link():
     Run('{LD} {LD_FLAGS} -shared -fPIC -Wl,-soname,libredmagic.so.1.0.0 -o build/libredmagic.so.1.0.0 {objs} {udis_libs} {LIBS}'.format(
         **dict(globals(), **locals())
     ))
+    after()
     Run('{LD} {LD_FLAGS} -o {TARGET} build/main.o build/libredmagic.so.1.0.0 -Wl,-rpath=$ORIGIN/build/'.format(
         **dict(globals(), **locals())
     ))
@@ -95,6 +98,9 @@ def compile():
             CXX=CXX
         ))
     Run('{CC} -c src/asm.s -o build/asm.o'.format(
+        CC=CC
+    ))
+    Run('{CC} -c src/asm_snippets.s -o build/asm_snippets.o'.format(
         CC=CC
     ))
     after()

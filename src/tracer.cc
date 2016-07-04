@@ -4,6 +4,12 @@
   #error "expecting 64 bit compile"
 #endif
 
+
+#ifdef CONF_COMPILE_IN_PARENT
+# include "compiler.h"
+#endif
+
+
 //#include <sys/time.h>
 
 
@@ -19,128 +25,14 @@ extern "C" {
 }
 
 
-// convert a register from udis to sys/reg.h
-static int ud_register_to_sys(ud_type t) {
-  switch(t) {
-  case UD_R_R15B:
-  case UD_R_R15W:
-  case UD_R_R15D:
-  case UD_R_R15:
-    return R15;
-  case UD_R_R14B:
-  case UD_R_R14W:
-  case UD_R_R14D:
-  case UD_R_R14:
-    return R14;
-  case UD_R_R13B:
-  case UD_R_R13W:
-  case UD_R_R13D:
-  case UD_R_R13:
-    return R13;
-  case UD_R_R12B:
-  case UD_R_R12W:
-  case UD_R_R12D:
-  case UD_R_R12:
-    return R12;
-  case UD_R_CH: // ??
-  case UD_R_BP:
-  case UD_R_EBP:
-  case UD_R_RBP:
-    return RBP;
-  case UD_R_BL:
-  case UD_R_BX:
-  case UD_R_EBX:
-  case UD_R_RBX:
-    return RBX;
-  case UD_R_R11B:
-  case UD_R_R11W:
-  case UD_R_R11D:
-  case UD_R_R11:
-    return R11;
-  case UD_R_R10B:
-  case UD_R_R10W:
-  case UD_R_R10D:
-  case UD_R_R10:
-    return R10;
-  case UD_R_R9B:
-  case UD_R_R9W:
-  case UD_R_R9D:
-  case UD_R_R9:
-    return R9;
-  case UD_R_R8B:
-  case UD_R_R8W:
-  case UD_R_R8D:
-  case UD_R_R8:
-    return R8;
-  case UD_R_AL:
-  case UD_R_AX:
-  case UD_R_EAX:
-  case UD_R_RAX:
-    return RAX;
-  case UD_R_CL:
-  case UD_R_CX:
-  case UD_R_ECX:
-  case UD_R_RCX:
-    return RCX;
-  case UD_R_DL:
-  case UD_R_DX:
-  case UD_R_EDX:
-  case UD_R_RDX:
-    return RDX;
-  case UD_R_DH:
-  case UD_R_SI:
-  case UD_R_ESI:
-  case UD_R_RSI:
-    return RSI;
-  case UD_R_BH:
-  case UD_R_DI:
-  case UD_R_EDI:
-  case UD_R_RDI:
-    return RDI;
-    // orig rax
-  case UD_R_RIP:
-    // instrunction pointer??
-    return RIP;
-  case UD_R_CS:
-    return CS;
-    // eflags not directly accessable, use pushf and popf
-  case UD_R_AH:
-  case UD_R_SP:
-  case UD_R_ESP:
-  case UD_R_RSP:
-    return RSP;
-    // fsbase, gsbase
-  case UD_R_DS:
-    return DS;
-  case UD_R_ES:
-    return ES;
-  case UD_R_FS:
-    return FS;
-  case UD_R_GS:
-    return GS;
-  default:
-    return -1;
-  }
-}
 
 namespace redmagic {
   int udis_input_hook(ud_t *ud) {
     Tracer* trace = (Tracer*)ud_get_user_opaque_data(ud);
 
-    unsigned long loc = trace->read_offset++;
+    mem_loc_t loc = trace->read_offset++;
 
-    // TODO: this looks like it can return 8 bytes at a time
-    if(trace->read_cache_loc == loc & ~0x7) {
-      // then we can just read the bytes from the cache
-      return (trace->read_cache >> (8 * (loc & 0x7))) & 0xff;
-    }
-
-    long res = ptrace(PTRACE_PEEKDATA, trace->thread_pid, loc & ~0x7, NULL);
-    trace->read_cache_loc = loc & ~0x7;
-    trace->read_cache = res;
-    int r = (res >> (8 * (loc & 0x7))) & 0xff;
-    return r;
-
+    return trace->readByte(loc);
   }
 }
 
@@ -387,9 +279,12 @@ void Tracer::run() {
           };
         } ru;
         // reads one word at a time
-        ru.r1 = ptrace(PTRACE_PEEKDATA, thread_pid, rv, NULL);
-        ru.r2 = ptrace(PTRACE_PEEKDATA, thread_pid, ((char*)rv) + 4, NULL);
-        reg_check.memory_value = ru.rr; //((r1 & 0xffffffff) << 32) | (r2 & 0xffffffff);
+        // ru.r1 = ptrace(PTRACE_PEEKDATA, thread_pid, rv, NULL);
+        // ru.r2 = ptrace(PTRACE_PEEKDATA, thread_pid, ((char*)rv) + 4, NULL);
+        // reg_check.memory_value = ru.rr; //((r1 & 0xffffffff) << 32) | (r2 & 0xffffffff);
+        assert(reg_check.scale_register == -1);
+
+        reg_check.memory_value = ptrace(PTRACE_PEEKDATA, thread_pid, rv + reg_check.memory_offset, NULL);
       } else {
         reg_check.register_value = static_cast<register_t*>((void*)&regs)[reg_check.check_register];
       }
@@ -443,7 +338,7 @@ void Tracer::run() {
     // skip forward till we find the next instruction to
     /* Check_struct cs; */
     while(ud_disassemble(&disassm)) {
-      cout << "[" << ud_insn_off(&disassm) << "] " << ud_insn_asm(&disassm) << "\t" << ud_insn_hex(&disassm) <<  endl << flush;
+      cout << "[0x" << std::hex << ud_insn_off(&disassm) << std::dec << "] " << ud_insn_asm(&disassm) << "\t" << ud_insn_hex(&disassm) <<  endl << flush;
       cs = decode_instruction();
       if(cs.check_register != -2)
         break;
@@ -483,15 +378,29 @@ void Tracer::run() {
 
  end_tracing:
 
+#ifdef CONF_COMPILE_IN_PARENT
+  // this thread has the program suspended at this point and should be able to perform reads of its memory from this thread
+  // so run the compiler from here
+
+  auto compiler = new Compiler(this);
+  compiler->Run();
+#endif
+
   if(ptrace(PTRACE_CONT, thread_pid, NULL, NULL) < 0) {
     perror("failed to continue after done ptrace");
   }
 
   // this is suppose to continue the trace once detached
   // however it seems to just leave the process in a frozen state
+
+  //#ifndef CONF_COMPILE_IN_PARENT
+  // we can't detach since we still need this connection to read from the programs memory
+
   if(ptrace(PTRACE_DETACH, thread_pid, NULL, NULL) < 0) {
     perror("failed to detach ptrace");
   }
+  //#error "wth"
+  //#endif
 
   cout << "finished the trace\n";
 
@@ -630,6 +539,7 @@ Check_struct Tracer::decode_instruction() {
     // TODO: check if we are performing a more complicated type of jump?
     // TODO: there is a form of ret that takes an assembly instruction for poping a variable number of spaces on the stack http://repzret.org/p/repzret/
     r.check_register = -1;
+    //r.memory_offset = -sizeof(mem_loc_t);
     r.check_memory = false;
     return r;
   }
@@ -655,16 +565,33 @@ Check_struct Tracer::decode_instruction() {
 }
 
 
-unsigned char Tracer::readByte(mem_loc_t where) {
+unsigned char Tracer::readByte(mem_loc_t loc) {
   // long res = ptrace(PTRACE_PEEKDATA, thread_pid, where & ~0x7, NULL);
   // return (res >> (8 * (where & 0x7))) & 0xff;
 
-  long res = ptrace(PTRACE_PEEKDATA, thread_pid, where, NULL);
-  return res & 0xff;
+  // long res = ptrace(PTRACE_PEEKDATA, thread_pid, where, NULL);
+  // return res & 0xff;
+
+
+  if(read_cache_loc == loc & ~0x7) {
+      // then we can just read the bytes from the cache
+    return (read_cache >> (8 * (loc & 0x7))) & 0xff;
+  }
+
+  long res = ptrace(PTRACE_PEEKDATA, thread_pid, loc & ~0x7, NULL);
+  if(errno) {
+    perror("failed to read memory");
+    assert(!errno);
+  }
+  read_cache_loc = loc & ~0x7;
+  read_cache = res;
+  int r = (res >> (8 * (loc & 0x7))) & 0xff;
+  return r;
+
 }
 
 void Tracer::writeByte(mem_loc_t where, uint8_t b) {
-  assert(readByte(140737351968729 - 7) != 0);
+  //assert(readByte(140737351968729 - 7) != 0);
   read_cache_loc = -1;
   long ores = ptrace(PTRACE_PEEKDATA, thread_pid, where & ~0x7, NULL);
   long res = ((long)b) << (8 * (where & 0x7)) | ((~(((long)0xff) << (8 * (where & 0x7)))) & ores);

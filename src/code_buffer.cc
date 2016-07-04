@@ -2,6 +2,9 @@
 
 #include <sys/mman.h>
 
+#include <iostream>
+using namespace std;
+
 using namespace redmagic;
 
 extern "C" void red_asm_compile_buff_near();
@@ -18,6 +21,9 @@ CodeBuffer::CodeBuffer(size_t size):
     perror("failed to mmap buffer");
   }
   memset(buffer, 0, size);
+#ifdef CONF_COMPILE_IN_PARENT
+  _tracer = NULL;
+#endif
   init();
 }
 
@@ -36,7 +42,11 @@ CodeBuffer::CodeBuffer(mem_loc_t start, size_t size):
   can_write_buffer(false),
   buffer_consumed(size)
 {
+#ifdef CONF_COMPILE_IN_PARENT
+  _tracer = NULL;
+#endif
   init();
+  processJumps();
 }
 
 #ifdef CONF_COMPILE_IN_PARENT
@@ -49,6 +59,7 @@ CodeBuffer::CodeBuffer(Tracer *tracer, mem_loc_t start, size_t size):
 {
   _tracer = tracer;
   init();
+  processJumps();
 }
 #endif
 
@@ -56,7 +67,7 @@ CodeBuffer::CodeBuffer(Tracer *tracer, mem_loc_t start, size_t size):
 uint8_t CodeBuffer::readByte(mem_loc_t offset) {
   assert(offset < size);
   if(_tracer) {
-    assert(!buffer);
+    assert(!owns_buffer);
     return _tracer->readByte(offset + (mem_loc_t)buffer);
   } else {
     return buffer[offset];
@@ -86,12 +97,21 @@ void CodeBuffer::init() {
   ud_set_mode(&disassm, 64);
   ud_set_vendor(&disassm, UD_VENDOR_INTEL);
   ud_set_syntax(&disassm, UD_SYN_INTEL);
+  ud_offset = 0;
+  ud_set_pc(&disassm, (mem_loc_t)buffer);
+}
+
+void CodeBuffer::processJumps() {
+  for(auto jmp : find_jumps(&disassm, size)) {
+    rebind_jumps j;
+    j.origional_offset = j.buffer_offset = jmp - (uint64_t)buffer;
+    j.origional_buffer = this;
+    jumps.push_back(j);
+  }
 }
 
 void CodeBuffer::writeToEnd(CodeBuffer &other, long start, long end) {
   mem_loc_t position = 0;
-  //mem_loc_t self_offset = buffer_consumed;
-
   if(start > 0)
     position = start;
   mem_loc_t startl = position;
@@ -115,4 +135,16 @@ void CodeBuffer::writeToEnd(CodeBuffer &other, long start, long end) {
       jumps.push_back(new_jmp);
     }
   }
+}
+
+void CodeBuffer::print() {
+  ud_offset = 0;
+  ud_set_pc(&disassm, (mem_loc_t)buffer);
+
+  while(ud_disassemble(&disassm)) {
+    cout << "[0x" << std::hex << ud_insn_off(&disassm) << std::dec << "] " << ud_insn_asm(&disassm) << "\t" << ud_insn_hex(&disassm) <<  endl;
+    if(ud_offset >= size)
+      break;
+  }
+  cout << flush;
 }

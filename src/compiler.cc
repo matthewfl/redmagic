@@ -14,7 +14,7 @@ Compiler::Compiler(
                    ) {
 #ifdef CONF_COMPILE_IN_PARENT
   _tracer = tracer;
-  traces = std::move(_tracer->traces);
+  this->traces = std::move(_tracer->traces);
 #else
   this->traces = std::move(traces);
 #endif
@@ -29,22 +29,42 @@ unsigned char Compiler::readByte(mem_loc_t where) {
 #endif
 }
 
+#ifdef CONF_COMPILE_IN_PARENT
+# define OPT_TRACE_ARG _tracer,
+#else
+# define OPT_TRACE_ARG
+#endif
+
+void Compiler::Run() {
+  vector<CodeBuffer> bufs;
+  CodeBuffer target_buffer(4 * 1024 * 1024);
+  for(int i = 0; i < traces.size() - 1; i++) {
+    JumpTrace tr = traces[i];
+    JumpTrace nt = traces[i+1];
+    CodeBuffer buf(OPT_TRACE_ARG tr.target_pc, nt.ins_pc - tr.target_pc);
+    bufs.push_back(buf);
+    cout << "test " << buf.getSize() << endl;
+  }
+
+  cout << "finished making all the bufs\n";
+}
+
 
 namespace redmagic {
-  size_t relocate_code(ud_t *source, void *dest, size_t length, size_t output_limit) {
-    size_t dest_len = 0;
-    size_t processed_len = 0;
-    while(processed_len < length && dest_len < output_limit) {
-      processed_len += ud_disassemble(source);
+  // size_t relocate_code(ud_t *source, void *dest, size_t length, size_t output_limit) {
+  //   size_t dest_len = 0;
+  //   size_t processed_len = 0;
+  //   while(processed_len < length && dest_len < output_limit) {
+  //     processed_len += ud_disassemble(source);
 
-      switch(ud_insn_mnemonic(source)) {
+  //     switch(ud_insn_mnemonic(source)) {
 
-      }
-    }
+  //     }
+  //   }
 
-    return dest_len;
+  //   return dest_len;
 
-  }
+  // }
 
   static int64_t get_opr_val_signed(const ud_operand_t *opr) {
     switch(opr->size) {
@@ -134,5 +154,128 @@ namespace redmagic {
 
     return ret;
   }
+
+
+  unsigned int find_clobbered_registers(ud_t *disassm, unsigned int found, unsigned int used, unsigned int count, size_t size) {
+    size_t processed = 0;
+
+#define SET_USED(x) {                           \
+      if(x > 0) used = used | 1 << x;           \
+    }
+
+    SET_USED(RIP);
+    SET_USED(EFLAGS);
+    SET_USED(GS);
+    SET_USED(FS);
+    SET_USED(ES);
+    SET_USED(DS);
+    SET_USED(FS_BASE);
+    SET_USED(GS_BASE);
+
+    while(processed < size) {
+      uint64_t ilen = ud_disassemble(disassm);
+      processed += ilen;
+      unsigned int clobbered = 0; // clobbered during this instruction
+      for(int i = 0;; i++) {
+        const ud_operand_t *opt = ud_insn_opr(disassm, i);
+        if(opt == NULL)
+          break;
+        switch(ud_insn_mnemonic(disassm)) {
+
+        case UD_Ixor:
+          if(i == 0 && opt->type == UD_OP_REG) {
+            const ud_operand_t *o2 = ud_insn_opr(disassm, 1);
+            if(o2->type == UD_OP_REG && o2->base == opt->base) {
+              int reg = ud_register_to_sys(opt->base);
+              if(reg != -1) {
+                clobbered |= 1 << reg;
+                break;
+              }
+            }
+          }
+          goto processes_used;
+
+        case UD_Ilea:
+          if(i == 0 && opt->type == UD_OP_REG) {
+            int reg = ud_register_to_sys(opt->base);
+            if(reg != -1) {
+              clobbered |= 1 << reg;
+              break;
+            }
+          }
+          goto processes_used;
+
+        case UD_Imov:
+        case UD_Imovapd:
+        case UD_Imovaps:
+        case UD_Imovbe:
+        case UD_Imovd:
+        case UD_Imovddup:
+        case UD_Imovdq2q:
+        case UD_Imovdqa:
+        case UD_Imovdqu:
+        case UD_Imovhlps:
+        case UD_Imovhpd:
+        case UD_Imovhps:
+        case UD_Imovlhps:
+        case UD_Imovlpd:
+        case UD_Imovlps:
+        case UD_Imovmskpd:
+        case UD_Imovmskps:
+        case UD_Imovntdq:
+        case UD_Imovntdqa:
+        case UD_Imovnti:
+        case UD_Imovntpd:
+        case UD_Imovntps:
+        case UD_Imovntq:
+        case UD_Imovq:
+        case UD_Imovq2dq:
+        case UD_Imovsb:
+        case UD_Imovsd:
+        case UD_Imovshdup:
+        case UD_Imovsldup:
+        case UD_Imovsq:
+        case UD_Imovss:
+        case UD_Imovsw:
+        case UD_Imovsx:
+        case UD_Imovsxd:
+        case UD_Imovupd:
+        case UD_Imovups:
+        case UD_Imovzx:
+          if(i == 0 && opt->type == UD_OP_REG) {
+            int reg = ud_register_to_sys(opt->base);
+            if(reg != -1) {
+              clobbered != 1 << reg;
+              break;
+            }
+          }
+          goto processes_used;
+
+        processes_used:
+        default:
+          if(opt->type == UD_OP_MEM) {
+            if(opt->base != UD_NONE) {
+              SET_USED(ud_register_to_sys(opt->base));
+            }
+            if(opt->index != UD_NONE) {
+              SET_USED(ud_register_to_sys(opt->base));
+            }
+          } else if(opt->type == UD_OP_REG) {
+            SET_USED(ud_register_to_sys(opt->base));
+          }
+          assert(opt->type != UD_OP_PTR);
+        }
+
+      }
+      // do this afterwards since we might set and use a register twice in the same operation
+      found = found | (clobbered & ~used);
+      if(bits_set(found) >= count) {
+        return found;
+      }
+    }
+    return found;
+  }
+
+#undef SET_USED
 
 }

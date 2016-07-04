@@ -17,6 +17,8 @@ namespace redmagic {
 #endif
              );
 
+    void Run();
+
   private:
     unsigned char readByte(mem_loc_t where);
 
@@ -61,12 +63,15 @@ namespace redmagic {
     // write another code buffer to the end of this one
     void writeToEnd(CodeBuffer &other, long start=-1, long end=-1);
 
+    void print();
+
   public:
     ud_t disassm;
   private:
     static int udis_input_hook(ud_t *ud);
     mem_loc_t ud_offset;
     void init();
+    void processJumps();
 
   private:
     uint8_t *buffer;
@@ -88,6 +93,11 @@ namespace redmagic {
   };
 
 
+  inline int bits_set(unsigned int x) {
+    return __builtin_popcount(x);
+  }
+
+  std::vector<mem_loc_t> find_jumps(ud_t *disassm, size_t size);
 
 }
 
