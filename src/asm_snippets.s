@@ -8,4 +8,11 @@ red_asm_push_const_to_stack_start:
   movq $0xfafafafafafafafa, %r15
   push %r15
   mov -8(%rsp), %r15
+
 red_asm_push_const_to_stack_end:
+
+  .global red_asm_decrease_stack_addr_start
+  .global red_asm_decrease_stack_addr_end
+red_asm_decrease_stack_addr_start:
+  add $0xfafa, %rsp
+red_asm_decrease_stack_addr_end:

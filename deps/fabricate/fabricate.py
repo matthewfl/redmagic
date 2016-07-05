@@ -141,7 +141,11 @@ def relative_to_abs_paths(args):
     return ret
 
 def Shell(args, **kwargs):
-    shell(*shlex.split(args), silent=False, **kwargs)
+    kw = {
+        'silent': False
+    }
+    kw.update(**kwargs)
+    return shell(*shlex.split(args), **kw)
 
 def shell(*args, **kwargs):
     r""" Run a command: program name is given in first arg and command line
@@ -1411,7 +1415,7 @@ def run(*args, **kwargs):
 
 def Run(cmd):
     lex = shlex.split(cmd)
-    run(*lex)
+    return run(*lex)
 
 def after(*args):
     """ wait until after the specified command groups complete and return

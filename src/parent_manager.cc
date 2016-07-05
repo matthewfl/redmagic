@@ -13,6 +13,10 @@ using namespace redmagic;
 
 namespace redmagic {
   ParentManager *parent_manager = nullptr;
+
+#ifdef CONF_COMPILE_IN_PARENT
+  Compiler *_global_compiler_pointer = nullptr;
+#endif
 }
 
 extern "C" void redmagic_start() {

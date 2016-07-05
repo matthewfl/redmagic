@@ -69,6 +69,9 @@ namespace redmagic {
   typedef decltype(((struct user_regs_struct*)(NULL))->r15) register_t;
   typedef uint64_t mem_loc_t; // a memory location in the debugged program
 
+  // helper functions for during the trace
+  extern "C" void red_unexpected_branch();
+
   class ChildManager {
   public:
     void backwards_branch(void*);
@@ -215,6 +218,7 @@ namespace redmagic {
     register_t ins_pc;    // pc of where the instruction is located
     register_t target_pc; // pc after the instruction executed
     ud_mnemonic_code instruction;
+    unsigned int ins_len;
     struct Check_struct check;
     // int check_register;
     // register_t register_value;

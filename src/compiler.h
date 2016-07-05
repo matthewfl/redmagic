@@ -62,8 +62,9 @@ namespace redmagic {
   public:
     // write another code buffer to the end of this one
     void writeToEnd(CodeBuffer &other, long start=-1, long end=-1);
-
     void print();
+
+    inline size_t getOffset() { return buffer_consumed; }
 
   public:
     ud_t disassm;

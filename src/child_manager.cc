@@ -40,6 +40,13 @@ extern "C" void redmagic_ensure_not_traced() {
   child_manager->ensure_not_traced();
 }
 
+extern "C" void red_unexpected_branch() {
+  // TODO: make this restart the trace, and then after the compile link it into the correct locations
+  assert(0);
+
+
+}
+
 extern "C" {
   void red_asm_temp_disable_trace();
   void red_asm_temp_enable_trace();

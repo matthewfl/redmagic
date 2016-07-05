@@ -34,6 +34,10 @@ namespace redmagic {
 
     return trace->readByte(loc);
   }
+
+#ifdef CONF_COMPILE_IN_PARENT
+  extern Compiler *_global_compiler_pointer;
+#endif
 }
 
 
@@ -161,6 +165,7 @@ void Tracer::run() {
     // by default do the default action
     Int3_action act = NO_ACT;
 
+    // -1 since int3 is 1 byte long, so we are going to the start of it
     setOffset(((mem_loc_t)regs.rip) - 1);
 
     //read_offset = ((mem_loc_t)regs.rip) - 1;
@@ -295,6 +300,7 @@ void Tracer::run() {
     jtrace.check = reg_check;
     jtrace.ins_pc = ud_insn_off(&disassm);
     jtrace.instruction = ud_insn_mnemonic(&disassm);
+    jtrace.ins_len = ud_insn_len(&disassm);
 
     if(ptrace(PTRACE_SINGLESTEP, thread_pid, NULL, NULL) < 0) {
       perror("failed to single step a branching instruction");
@@ -383,7 +389,8 @@ void Tracer::run() {
   // so run the compiler from here
 
   auto compiler = new Compiler(this);
-  compiler->Run();
+compiler->Run();
+  _global_compiler_pointer = compiler;
 #endif
 
   if(ptrace(PTRACE_CONT, thread_pid, NULL, NULL) < 0) {
@@ -530,14 +537,22 @@ Check_struct Tracer::decode_instruction() {
 
   case UD_Iiretw:
   case UD_Iiretd:
-  case UD_Iiretq:
+  case UD_Iiretq: {
     // these should not be found
     perror("interupt return instructions?");
 
+    ::exit(1);
+  }
   case UD_Iret:
   case UD_Iretf: {
     // TODO: check if we are performing a more complicated type of jump?
     // TODO: there is a form of ret that takes an assembly instruction for poping a variable number of spaces on the stack http://repzret.org/p/repzret/
+
+    // controls how much the stack pointer should change by in addition
+    // currently not setup to handle this
+    const ud_operand_t *opr = ud_insn_opr(&disassm, 0);
+    assert(opr == NULL);
+
     r.check_register = -1;
     //r.memory_offset = -sizeof(mem_loc_t);
     r.check_memory = false;

@@ -1,6 +1,10 @@
+//#define _GNU_SOURCE
+#include <dlfcn.h>
+
 #include "compiler.h"
 
 using namespace redmagic;
+
 
 #include <iostream>
 using namespace std;
@@ -35,16 +39,107 @@ unsigned char Compiler::readByte(mem_loc_t where) {
 # define OPT_TRACE_ARG
 #endif
 
+#define EXTERN_SNIPPET(name)                    \
+  extern "C" void name ## _start () ;           \
+  extern "C" void name ## _end () ;             \
+  const static size_t name ## _len =  ((mem_loc_t)& name ## _end) - ((mem_loc_t)& name ## _start) ;
+
+EXTERN_SNIPPET(red_asm_decrease_stack_addr);
+EXTERN_SNIPPET(red_asm_push_const_to_stack);
+
+
+static void _self_filler_func() {}
+
 void Compiler::Run() {
   vector<CodeBuffer> bufs;
   CodeBuffer target_buffer(4 * 1024 * 1024);
+  Dl_info dlinfo, dlinfo_self;
+  int r = dladdr((void*)&_self_filler_func, &dlinfo_self);
+  assert(r);
+
+  vector<mem_loc_t> forward_jumps;
+
+#define CODEBUF_SNIPPET(snipname)      \
+  CodeBuffer cb_snip_ ## snipname ( OPT_TRACE_ARG ((mem_loc_t)& snipname ## _start) , snipname ## _len) ;
+
+#define REPLACE_FILLER(type, from, to)                                \
+  {                                                                   \
+    uint8_t did_replace = 0;                                          \
+    type current_value = 0;                                           \
+    size_t location = start_off;                                      \
+    while(location < end_off) {                                       \
+      current_value <<= 8;                                            \
+      current_value |= target_buffer.readByte(location);              \
+      if(current_value == from) {                                     \
+        for(int _ii = sizeof(type) - 1; _ii >= 0; _ii--) {            \
+          target_buffer.writeByte(location - _ii, to >> (8 * (sizeof(type) - _ii - 1))); \
+        }                                                             \
+        did_replace = 1;                                              \
+        break;                                                        \
+      }                                                               \
+      location++;                                                     \
+    }                                                                 \
+    assert(did_replace);                                              \
+  }
+
+#define REPLACE_16(from, to) REPLACE_FILLER(uint16_t, from, to)
+#define REPLACE_64(from, to) REPLACE_FILLER(uint64_t, from, to)
+
+
+#define INSERT_SNIPPET(snipname, ...)                  \
+  {                                                    \
+    size_t start_off = target_buffer.getOffset();      \
+    target_buffer.writeToEnd(cb_snip_ ## snipname);    \
+    size_t end_off = target_buffer.getOffset();        \
+    __VA_ARGS__ ;                                      \
+  }
+
+  CODEBUF_SNIPPET(red_asm_decrease_stack_addr);
+  CODEBUF_SNIPPET(red_asm_push_const_to_stack);
+
   for(int i = 0; i < traces.size() - 1; i++) {
     JumpTrace tr = traces[i];
     JumpTrace nt = traces[i+1];
+    // determine if this is something internal to redmagic
+    // and should be ignored
+    r = dladdr((void*)tr.ins_pc, &dlinfo);
+    if(r && dlinfo.dli_fbase == dlinfo_self.dli_fbase) {
+      // this is a symbol in redmagic so we are going to ignore it
+      continue;
+    }
+
+    if(tr.check.check_register != -1) {
+      // then this is not a conditional branch instruction
+      if(tr.check.check_register == EFLAGS) {
+        // this is some conditional jump
+
+      }
+    }
+    if(tr.instruction == UD_Iretf || tr.instruction == UD_Iret) {
+      // then we have to move the stack pointer
+      INSERT_SNIPPET(red_asm_decrease_stack_addr,
+                     REPLACE_16(0xfafa, 8);
+                     );
+      cout << "qwer";
+    }
+    if(tr.instruction == UD_Icall) {
+      INSERT_SNIPPET(red_asm_push_const_to_stack,
+                     REPLACE_64(0xfafafafafafafafa, tr.ins_pc + tr.ins_len);
+                     );
+    }
+
+
     CodeBuffer buf(OPT_TRACE_ARG tr.target_pc, nt.ins_pc - tr.target_pc);
     bufs.push_back(buf);
-    cout << "test " << buf.getSize() << endl;
+
+    target_buffer.writeToEnd(buf);
+
+
+
+    cout << "test " << buf.getSize() << " " << target_buffer.getOffset() << endl;
   }
+
+
 
   cout << "finished making all the bufs\n";
 }

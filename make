@@ -12,7 +12,7 @@ TARGET = 'jit-test'
 
 UNIT_TARGET = 'build/unit_tests'
 
-GIT_VERSION=Shell('git describe --always --long --dirty --abbrev=12', silent=True).strip()
+GIT_VERSION = Shell('git describe --always --long --dirty --abbrev=12', silent=True).strip()
 
 CXX_FLAGS = (
     '-fPIC '
@@ -28,6 +28,7 @@ CXX_FLAGS_UNIT = (
 )
 LIBS = (
     '-pthread '
+    '-ldl '
     '-Wl,-Bstatic -lboost_context -Wl,-Bdynamic '
     # '-ljemalloc'
 )
