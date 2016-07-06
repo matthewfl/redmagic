@@ -6,6 +6,7 @@
 
 namespace redmagic {
 
+#if 0
   class Compiler {
 
   public:
@@ -29,6 +30,8 @@ namespace redmagic {
     std::vector<JumpTrace> traces;
 
   };
+#endif
+
 
   // output buffer for the compiler
   class CodeBuffer final {

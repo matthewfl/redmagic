@@ -8,7 +8,7 @@ using namespace std;
 using namespace redmagic;
 
 namespace redmagic {
-  ChildManager *child_manager = nullptr;
+  //ChildManager *child_manager = nullptr;
   thread_local bool is_traced = false;
   thread_local bool is_temp_disabled = false;
   thread_local bool is_running_compiled = false;

@@ -9,6 +9,8 @@ using namespace redmagic;
 #include <iostream>
 using namespace std;
 
+#if 0
+
 Compiler::Compiler(
 #ifdef CONF_COMPILE_IN_PARENT
                    Tracer *tracer
@@ -374,3 +376,5 @@ namespace redmagic {
 #undef SET_USED
 
 }
+
+#endif // 0
