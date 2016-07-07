@@ -24,6 +24,7 @@ namespace redmagic {
 
     struct jump_instruction_info decode_instruction();
     void evaluate_instruction();
+    void replace_rip_instruction();
 
     void continue_program(mem_loc_t);
     void write_interrupt_block();
@@ -39,8 +40,16 @@ namespace redmagic {
       *((register_t*)((mem_loc_t)regs_struct->rsp + TRACE_STACK_OFFSET + move_stack_by)) = v;
     }
 
+    struct opr_value {
+      ud_type type;
+      bool is_ptr;
+      union {
+        register_t address;
+        register_t value;
+      };
+    };
 
-    register_t get_opr_value(const ud_operand_t *opr);
+    opr_value get_opr_value(const ud_operand_t *opr);
 
 
     // static void tracer_start_cb(intptr_t ptr);

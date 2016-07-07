@@ -58,26 +58,34 @@ void Tracer::Run(void *other_stack) {
   mem_loc_t last_location;
   mem_loc_t generated_location;
   struct jump_instruction_info jmp_info;
+  bool rip_used = false;
 
   while(true) {
     assert(before_stack == 0xdeadbeef);
     assert(after_stack == 0xdeadbeef);
     generated_location = buffer->getRawBuffer() + buffer->getOffset();
     last_location = current_location = udis_loc;
+  processes_instructions:
     while(ud_disassemble(&disassm)) {
       cout << "[0x" << std::hex << ud_insn_off(&disassm) << std::dec << "] " << ud_insn_asm(&disassm) << "\t" << ud_insn_hex(&disassm) <<  endl << flush;
       jmp_info = decode_instruction();
       if(jmp_info.is_jump)
-        break;
+        goto run_instructions;
       for(int i = 0;; i++) {
         const ud_operand_t *opr = ud_insn_opr(&disassm, i);
-        if(opr == NULL) break;
-        assert(opr->base != UD_R_RIP && opr->index != UD_R_RIP);
+        if(opr == NULL)
+          break;
+        if(opr->base == UD_R_RIP || opr->index == UD_R_RIP) {
+          rip_used = true;
+          goto run_instructions;
+        }
+        //assert(opr->base != UD_R_RIP && opr->index != UD_R_RIP);
       }
       last_location = udis_loc;
       //CodeBuffer one_ins(ud_insn_off(&disassm), ud_insn_len(&disassm));
       //buffer->writeToEnd(one_ins);
     }
+  run_instructions:
     if(current_location != last_location) {
       {
         CodeBuffer ins_set(current_location, last_location - current_location);
@@ -87,8 +95,19 @@ void Tracer::Run(void *other_stack) {
       write_interrupt_block();
       continue_program(generated_location);
     }
-    evaluate_instruction();
-
+  rewrite_instructions:
+    regs_struct->rip = udis_loc;
+    if(rip_used) {
+      generated_location = buffer->getRawBuffer() + buffer->getOffset();
+      replace_rip_instruction();
+      rip_used = false;
+      // we have to evaluate this instruction which has been written
+      write_interrupt_block();
+      continue_program(generated_location);
+    } else {
+      // this is a jump instruction that we are evaluating and replacing
+      evaluate_instruction();
+    }
 
 
   }
@@ -123,9 +142,58 @@ namespace {
 #define ASM_BLOCK(label)                                    \
   extern "C" void red_asm_ ## label ## _start();            \
   extern "C" void red_asm_ ## label ## _end();              \
-  namespace {                                               \
-    CodeBuffer cb_asm_ ## label ((mem_loc_t)&red_asm_ ## label ## _start, (size_t)((mem_loc_t)&red_asm_ ## label ## _end - (mem_loc_t)&red_asm_ ## label ## _start)); \
-  }
+  static CodeBuffer cb_asm_ ## label ((mem_loc_t)&red_asm_ ## label ## _start, (size_t)((mem_loc_t)&red_asm_ ## label ## _end - (mem_loc_t)&red_asm_ ## label ## _start));
+
+  // [all cap name, %reg name, reg struct offset]
+#define MAIN_REGISTERS(METHOD)  \
+  METHOD(R15, %r15, 0)        \
+  METHOD(R14, %r14, 8)        \
+  METHOD(R13, %r13, 16)       \
+  METHOD(R12, %r12, 24)       \
+  METHOD(RBP, %rbp, 32)       \
+  METHOD(RBX, %rbx, 40)       \
+  METHOD(R11, %r11, 48)       \
+  METHOD(R10, %r10, 56)       \
+  METHOD(R9,  %r9,  64)       \
+  METHOD(R8,  %r8,  72)       \
+  METHOD(RAX, %rax, 80)       \
+  METHOD(RCX, %rcx, 88)       \
+  METHOD(RDX, %rdx, 96)       \
+  METHOD(RSI, %rsi, 104)      \
+  METHOD(RDI, %rdi, 112)
+
+struct group_register_instructions_s {
+  int register_index;
+  CodeBuffer instruction;
+};
+
+#define LOAD_SET_REGISTER1(CNAME, RNAME, OFFSET)  \
+  ASM_BLOCK(set_reg_ ## CNAME)
+
+#define LOAD_SET_REGISTER2(CNAME, RNAME, OFFSET)    \
+  {                                                 \
+    CNAME , /* ref sys/regs.h */                    \
+      cb_asm_set_reg_ ## CNAME                     \
+      } ,
+
+MAIN_REGISTERS(LOAD_SET_REGISTER1)
+
+static group_register_instructions_s set_register_instructions[] = {
+  MAIN_REGISTERS(LOAD_SET_REGISTER2)
+};
+
+#define LOAD_TEST_REGISTER1(CNAME, RNAME, OFFSET) \
+  ASM_BLOCK(test_reg_ ## CNAME)
+
+#define LOAD_TEST_REGISTER2(CNAME, RNAME, OFFSET) \
+  { CNAME, cb_asm_test_reg_ ## CNAME } ,
+
+MAIN_REGISTERS(LOAD_TEST_REGISTER1)
+
+static group_register_instructions_s test_register_instructions[] = {
+  MAIN_REGISTERS(LOAD_TEST_REGISTER2)
+};
+
 
 ASM_BLOCK(pop_stack);
 ASM_BLOCK(push_stack);
@@ -145,38 +213,96 @@ void Tracer::set_pc(uint64_t l) {
   ud_set_pc(&disassm, l);
 }
 
-redmagic::register_t Tracer::get_opr_value(const ud_operand_t *opr) {
+Tracer::opr_value Tracer::get_opr_value(const ud_operand_t *opr) {
+  struct opr_value ret;
+
+  ret.type = opr->type;
+  ret.is_ptr = false;
+
   switch(opr->type) {
   case UD_OP_IMM:
   case UD_OP_CONST:
     switch(opr->size) {
       // not sure if should return these signed
     case 8:
-      return opr->lval.sbyte;
+      ret.value = opr->lval.sbyte;
+      return ret;
     case 16:
-      return opr->lval.sword;
+      ret.value = opr->lval.sword;
+      return ret;
     case 32:
-      return opr->lval.sdword;
+      ret.value = opr->lval.sdword;
+      return ret;
     case 64:
-      return opr->lval.sqword;
+      ret.value = opr->lval.sqword;
+      return ret;
     }
   case UD_OP_JIMM:
     switch(opr->size) {
     case 8:
-      return opr->lval.sbyte + udis_loc;
+      ret.address = opr->lval.sbyte + udis_loc;
+      return ret;
     case 16:
-      return opr->lval.sword + udis_loc;
+      ret.address = opr->lval.sword + udis_loc;
+      return ret;
     case 32:
-      return opr->lval.sdword + udis_loc;
+      ret.address = opr->lval.sdword + udis_loc;
+      return ret;
     case 64:
-      return opr->lval.sqword + udis_loc;
+      ret.address = opr->lval.sqword + udis_loc;
+      return ret;
     }
   case UD_OP_REG: {
     int r = ud_register_to_sys(opr->base);
     assert(r != -1);
-    return ((register_t*)regs_struct)[r];
+    ret.value = ((register_t*)regs_struct)[r];
+    return ret;
   }
-  case UD_OP_MEM:
+  case UD_OP_MEM: {
+    int ri = ud_register_to_sys(opr->base);
+    assert(ri != -1);
+    register_t rv = ((register_t*)regs_struct)[ri];
+    if(opr->index != UD_NONE) {
+      int ii = ud_register_to_sys(opr->index);
+      register_t iv = ((register_t*)regs_struct)[ii];
+      switch(opr->scale) {
+      case 1:
+        break;
+      case 2:
+        iv <<= 1;
+        break;
+      case 4:
+        iv <<= 2;
+        break;
+      case 8:
+        iv <<= 3;
+        break;
+      default:
+        assert(0);
+      }
+      rv += iv;
+    }
+    switch(opr->offset) {
+    case 8:
+      rv += opr->lval.sbyte;
+      break;
+    case 16:
+      rv += opr->lval.sword;
+      break;
+    case 32:
+      rv += opr->lval.sdword;
+      break;
+    case 64:
+      rv += opr->lval.sqword;
+      break;
+    default:
+      assert(0);
+    }
+    ret.address = rv;
+    ret.is_ptr = true;
+    return ret;
+    //return *(register_t*)rv;
+  }
   case UD_OP_PTR:
     assert(0);
   }
@@ -464,7 +590,17 @@ void Tracer::evaluate_instruction() {
           assert(0);
         }
       }
-    } else {
+    } else if(opr->type == UD_OP_REG) {
+      assert(opr->index == UD_NONE);
+      int ri = ud_register_to_sys(opr->base);
+      assert(ri != -1);
+      register_t rv = ((register_t*)regs_struct)[ri];
+      assert(ri < sizeof(test_register_instructions) / sizeof(group_register_instructions_s));
+      auto written = buffer->writeToEnd(test_register_instructions[ri].instruction);
+      written.replace_stump<uint64_t>(0xfafafafafafafafa, rv);
+      set_pc(rv);
+    }
+    else {
       assert(0);
     }
     return;
@@ -548,4 +684,36 @@ void Tracer::evaluate_instruction() {
   }
   }
 
+}
+
+
+void Tracer::replace_rip_instruction() {
+
+  enum ud_mnemonic_code mnem = ud_insn_mnemonic(&disassm);
+
+  switch(mnem) {
+  case UD_Ilea: {
+    const ud_operand_t *opr1 = ud_insn_opr(&disassm, 0); // dest address
+    const ud_operand_t *opr2 = ud_insn_opr(&disassm, 1); // source address
+    assert(opr1 != NULL && opr2 != NULL);
+    assert(opr2->base == UD_R_RIP || opr2->index == UD_R_RIP); // assume that we are loading this address
+    if(opr2->base == UD_R_RIP && opr2->index == UD_NONE) {
+      opr_value val = get_opr_value(opr2);
+      assert(val.is_ptr);
+      assert(opr1->type == UD_OP_REG);
+      int dest = ud_register_to_sys(opr1->base);
+      assert(dest < sizeof(set_register_instructions) / sizeof(group_register_instructions_s));
+
+      auto written = buffer->writeToEnd(set_register_instructions[dest].instruction);
+      written.replace_stump<uint64_t>(0xfafafafafafafafa, val.address);
+      return;
+    }
+    assert(0);
+
+
+    assert(0);
+  }
+  default:
+    assert(0);
+  }
 }

@@ -135,10 +135,95 @@ namespace redmagic {
   };
 
 
-  inline int bits_set(unsigned int x) {
+  template <typename T> inline int bits_set(T x) {
     return __builtin_popcount(x);
   }
 
+  static int ud_register_to_size(ud_type t) {
+    switch(t) {
+    case UD_R_R15B:
+    case UD_R_R14B:
+    case UD_R_R13B:
+    case UD_R_R12B:
+    case UD_R_CH:
+    case UD_R_BL:
+    case UD_R_R11B:
+    case UD_R_R10B:
+    case UD_R_R9B:
+    case UD_R_R8B:
+    case UD_R_AL:
+    case UD_R_CL:
+    case UD_R_DL:
+    case UD_R_DH:
+    case UD_R_BH:
+    case UD_R_AH:
+      return 1;
+
+    case UD_R_R15W:
+    case UD_R_R14W:
+    case UD_R_R13W:
+    case UD_R_R12W:
+    case UD_R_BP:
+    case UD_R_BX:
+    case UD_R_R11W:
+    case UD_R_R10W:
+    case UD_R_R9W:
+    case UD_R_R8W:
+    case UD_R_AX:
+    case UD_R_CX:
+    case UD_R_DX:
+    case UD_R_SI:
+    case UD_R_DI:
+    case UD_R_SP:
+      return 2;
+
+    case UD_R_R15D:
+    case UD_R_R14D:
+    case UD_R_R13D:
+    case UD_R_R12D:
+    case UD_R_EBP:
+    case UD_R_EBX:
+    case UD_R_R11D:
+    case UD_R_R10D:
+    case UD_R_R9D:
+    case UD_R_R8D:
+    case UD_R_EAX:
+    case UD_R_ECX:
+    case UD_R_EDX:
+    case UD_R_EDI:
+    case UD_R_ESI:
+    case UD_R_ESP:
+    case UD_R_DS:
+    case UD_R_ES:
+    case UD_R_FS:
+    case UD_R_GS:
+    case UD_R_CS:
+      return 4;
+
+    case UD_R_R15:
+    case UD_R_R14:
+    case UD_R_R13:
+    case UD_R_R12:
+    case UD_R_RBP:
+    case UD_R_RBX:
+    case UD_R_R11:
+    case UD_R_R10:
+    case UD_R_R9:
+    case UD_R_R8:
+    case UD_R_RAX:
+    case UD_R_RCX:
+    case UD_R_RDX:
+    case UD_R_RSI:
+    case UD_R_RDI:
+    case UD_R_RIP:
+    case UD_R_RSP:
+      return 8;
+
+    default:
+      return -1;
+
+    }
+  }
 
   // convert a register from udis to sys/reg.h
   static int ud_register_to_sys(ud_type t) {

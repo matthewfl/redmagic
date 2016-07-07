@@ -95,12 +95,29 @@ def compile():
     # Run('{CC} -c src/asm.s -o build/asm.o'.format(
     #     CC=CC
     # ))
-    Run('{CC} -c src/asm_snippets.s -o build/asm_snippets.o'.format(
-        CC=CC
-    ))
-    Run('{CC} -c src/asm_interface.s -o build/asm_interface.o'.format(
-        CC=CC
-    ))
+    for s in ['asm_snippets.S', 'asm_interface.S']:
+        Run('{CC} -c -E src/{fname} -o build/{cname}'.format(
+            CC=CC,
+            fname=s,
+            cname=s.replace('.S', '.s')
+        ), group='asm_snippet1-{}'.format(s)
+        )
+        Run("sed -i '\"s/NL/\\\n/g\"' build/{}".format(s.replace('.S', '.s')),
+            group='asm_snippet2-{}'.format(s),
+            after='asm_snippet1-{}'.format(s)
+        )
+        Run('{CC} -c build/{fname} -o build/{oname}'.format(
+            CC=CC,
+            fname=s.replace('.S', '.s'),
+            oname=s.replace('.S', '.o'),
+        ), after='asm_snippet2-{}'.format(s))
+
+    # Run('{CC} -c src/asm_snippets.S -o build/asm_snippets.o'.format(
+    #     CC=CC
+    # ))
+    # Run('{CC} -c src/asm_interface.S -o build/asm_interface.o'.format(
+    #     CC=CC
+    # ))
     after()
 
 def unit_compile():

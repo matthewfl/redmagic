@@ -1,4 +1,4 @@
-.include "src/asm_macros.s"
+#include "asm_macros.S"
 
 
   .global red_asm_push_all_regs_start

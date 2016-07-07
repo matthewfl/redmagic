@@ -1,3 +1,5 @@
+#include "asm_macros.S"
+
 
   .global red_asm_pop_stack_start
   .global red_asm_pop_stack_end
@@ -98,6 +100,51 @@ red_asm_call_direct_start:
   .byte 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa
 2:
 red_asm_call_direct_end:
+
+  .global red_asm_count_start
+  .global red_asm_count_end
+  .global red_asm_count_offset
+red_asm_count_start:
+  jmp 2f
+1:
+red_asm_count_offset:
+  .byte 0,0,0,0,0,0,0,0
+2:
+  movq %r15, -728(%rsp)
+  movq 1b(%rip), %r15
+  inc %r15
+  movq %r15, 1b(%rip)
+red_asm_count_end:
+
+#define MAKE_SET_BLOCK(CNAME, RNAME, OFFSET)     \
+  .global red_asm_set_reg_ ## CNAME ## _start NL \
+  .global red_asm_set_reg_ ## CNAME ## _end   NL \
+red_asm_set_reg_ ## CNAME ## _start:          NL \
+  movq $0xfafafafafafafafa, RNAME             NL \
+red_asm_set_reg_ ## CNAME ## _end:            NL NL
+
+  MAIN_REGISTERS(MAKE_SET_BLOCK)
+
+
+#define MAKE_TEST_REG_BLOCK(CNAME, RNAME, OFFSET) \
+  .global red_asm_test_reg_ ## CNAME ## _start NL \
+  .global red_asm_test_reg_ ## CNAME ## _end   NL \
+red_asm_test_reg_ ## CNAME ## _start:          NL \
+  pushf                                        NL \
+  test RNAME, 1f(%rip)                         NL \
+  je 10f                                       NL \
+  popf                                         NL \
+  jmp *2f(%rip)                                NL \
+1: /* compare register to */                   NL \
+  .byte 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa  NL \
+2: /* where to jump on failure */              NL \
+  .byte 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb  NL \
+10:                                            NL \
+  popf                                         NL \
+red_asm_test_reg_ ## CNAME ## _end:            NL NL
+
+MAIN_REGISTERS(MAKE_TEST_REG_BLOCK)
+
 
 
 // we don't need executable stack

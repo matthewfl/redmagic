@@ -2,6 +2,8 @@
   * argument registers:  rdi, rsi, rdx, rcx, r8, r9
   * preserve registers: rbx, rsp, rbp, r12, r13, r14, r15
   * scratch registers: rax, rdi, rsi, rdx, rcx, r8, r9, r10, r11
+  *
+  * N.L represents a new line in the macro expansion
   */
 
   ////////////////////////////////////////////////////
@@ -98,3 +100,22 @@
   add $728, %rsp
 
   .endm
+
+
+  // [all cap name, %reg name, reg struct offset]
+#define MAIN_REGISTERS(METHOD)  \
+  METHOD(R15, %r15, 0)        \
+  METHOD(R14, %r14, 8)        \
+  METHOD(R13, %r13, 16)       \
+  METHOD(R12, %r12, 24)       \
+  METHOD(RBP, %rbp, 32)       \
+  METHOD(RBX, %rbx, 40)       \
+  METHOD(R11, %r11, 48)       \
+  METHOD(R10, %r10, 56)       \
+  METHOD(R9,  %r9,  64)       \
+  METHOD(R8,  %r8,  72)       \
+  METHOD(RAX, %rax, 80)       \
+  METHOD(RCX, %rcx, 88)       \
+  METHOD(RDX, %rdx, 96)       \
+  METHOD(RSI, %rsi, 104)      \
+  METHOD(RDI, %rdi, 112)
