@@ -42,12 +42,6 @@ def build():
     compile()
     link()
 
-def mic():
-    global CXX, CXX_FLAGS, LD
-    CXX_FLAGS += '-wd1478 '  # using dep std::smart pointer
-    CXX = 'icpc'
-    LD = 'icpc'
-
 def release():
     global CXX_FLAGS, LD_FLAGS
     CXX_FLAGS = CXX_FLAGS.replace('-O0', '-O2')

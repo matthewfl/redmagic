@@ -29,34 +29,33 @@ Tracer::Tracer(shared_ptr<CodeBuffer> buffer) {
 extern "C" void red_begin_tracing(void *other_stack, void* __, Tracer* tracer) {
 
   //tracer->regs_struct = other_stack;
-  tracer->Run();
+  tracer->Run(other_stack);
 
   // can not return from this method
   assert(0);
 }
 
-extern "C" void red_asm_start_tracing(void*, void*, void*, void*);
+extern "C" void* red_asm_start_tracing(void*, void*, void*, void*);
+extern "C" void red_asm_ret_only();
 
-void Tracer::Start() {
-  using namespace boost::context;
+void __attribute__ ((optimize("O2"))) Tracer::Start() {
 
-  void *start_end_addr = &&tracer_start_end;
-  set_pc((uint64_t)start_end_addr);
+  set_pc((uint64_t)&red_asm_ret_only);
 
   red_asm_start_tracing(NULL, (void*)&red_begin_tracing, this, stack - sizeof(stack));
- tracer_start_end:
-  return;
 }
 
 
-void Tracer::Run() {
+void Tracer::Run(void *other_stack) {
+  regs_struct = (struct user_regs_struct*)other_stack;
+
   mem_loc_t current_location;
   mem_loc_t last_location;
   struct jump_instruction_info jmp_info;
 
   while(true) {
 
-    current_location = udis_loc;
+    last_location = current_location = udis_loc;
     while(ud_disassemble(&disassm)) {
       cout << "[0x" << std::hex << ud_insn_off(&disassm) << std::dec << "] " << ud_insn_asm(&disassm) << "\t" << ud_insn_hex(&disassm) <<  endl << flush;
       jmp_info = decode_instruction();
@@ -66,12 +65,14 @@ void Tracer::Run() {
       //CodeBuffer one_ins(ud_insn_off(&disassm), ud_insn_len(&disassm));
       //buffer->writeToEnd(one_ins);
     }
-    CodeBuffer ins_set(current_location, last_location - current_location);
-    buffer->writeToEnd(ins_set);
+    if(current_location != last_location) {
+      CodeBuffer ins_set(current_location, last_location - current_location);
+      buffer->writeToEnd(ins_set);
 
-    write_interupt_block();
-
-    continue_program(current_location);
+      write_interupt_block();
+      continue_program(current_location);
+    }
+    evaluate_instruction();
 
 
 
@@ -79,18 +80,22 @@ void Tracer::Run() {
 }
 
 
-void Tracer::tracer_start_cb(intptr_t ptr) {
-  Tracer *t = (Tracer*)ptr;
-  t->Run();
-  assert(0);
-}
+// void Tracer::tracer_start_cb(intptr_t ptr) {
+//   Tracer *t = (Tracer*)ptr;
+//   t->Run();
+//   assert(0);
+// }
 
 
 extern "C" void* red_asm_resume_eval_block(void*, void*);
 
 void Tracer::continue_program(mem_loc_t resume_loc) {
-  ((register_t*)regs_struct)[-1] = resume_loc;
+  assert(regs_struct->rsp == (register_t)regs_struct);
+  regs_struct->rsp += move_stack_by;
+  move_stack_by = 0;
+  *((register_t*)(regs_struct->rsp + 728 /* hardcode offset from this base stack */ - 448 /* hardcode offset to find jump to loc */)) = resume_loc;
   regs_struct = (struct user_regs_struct*)red_asm_resume_eval_block(&resume_struct, regs_struct);
+
 }
 
 extern "C" void red_asm_resume_tracer_block_start();
@@ -218,5 +223,62 @@ struct jump_instruction_info Tracer::decode_instruction() {
 }
 
 void Tracer::evaluate_instruction() {
+
+  switch(ud_insn_mnemonic(&disassm)) {
+  case UD_Ijo:
+  case UD_Ijno:
+  case UD_Ijb:
+  case UD_Ijae:
+  case UD_Ijz:
+  case UD_Ijnz:
+  case UD_Ijbe:
+  case UD_Ija:
+  case UD_Ijs:
+  case UD_Ijns:
+  case UD_Ijp:
+  case UD_Ijnp:
+  case UD_Ijl:
+  case UD_Ijge:
+  case UD_Ijle:
+  case UD_Ijg: {
+    assert(0);
+  }
+  case UD_Ijcxz:
+  case UD_Ijecxz:
+  case UD_Ijrcxz: {
+    assert(0);
+  }
+  case UD_Ijmp: {
+    assert(0);
+  }
+  case UD_Icall: {
+    assert(0);
+  }
+  case UD_Iiretw:
+  case UD_Iiretd:
+  case UD_Iiretq: {
+    // these should not be found
+    perror("interupt return instructions?");
+    ::exit(1);
+  }
+  case UD_Iret:
+  case UD_Iretf: {
+    const ud_operand_t *opr = ud_insn_opr(&disassm, 0);
+    assert(opr == NULL);
+
+
+
+    assert(0);
+  }
+
+  case UD_Iinvalid: {
+    cerr << "no idea: " << ud_insn_hex(&disassm) << endl;
+    assert(0);
+  }
+
+  default: {
+    assert(0);
+  }
+  }
 
 }

@@ -13,8 +13,10 @@ namespace redmagic {
     void Start();
 
     inline mem_loc_t _get_udis_location() { return udis_loc++; }
-  private:
+
     void Run(void *);
+  private:
+
 
     void set_pc(uint64_t);
 
@@ -26,7 +28,7 @@ namespace redmagic {
 
 
 
-    static void tracer_start_cb(intptr_t ptr);
+    // static void tracer_start_cb(intptr_t ptr);
 
   private:
 
@@ -42,6 +44,7 @@ namespace redmagic {
     } resume_struct;
 
     struct user_regs_struct *regs_struct;
+    int64_t move_stack_by = 0;
 
     std::shared_ptr<CodeBuffer> buffer;
     ud_t disassm;

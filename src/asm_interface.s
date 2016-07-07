@@ -6,68 +6,94 @@
 
   ////////////////////////////////////////////////////
   .macro  m_push_all_regs
-  // should match the direction in sys/regs.h
-  push %r15
-  push %r14
-  push %r13
-  push %rbp
-  push %rbx
-  push %r11
-  push %r10
-  push %r9
-  push %r8
-  push %rax
-  push %rcx
-  push %rdx
-  push %rsi
-  push %rdi
-  // orig rax??
-  // push %rip (bad instruction)t
-  // push %cs (bad instruction)
-  sub $24, %rsp
+  // should match sys/regs.h, sys/user.h
+  // 216 bytes for the struct, and then offset by 512 from the current stack
+  sub $728, %rsp
 
-  //push %eflags
+  movq %r15, 0(%rsp)
+  movq %r14, 8(%rsp)
+  movq %r13, 16(%rsp)
+  movq %r12, 24(%rsp)
+  movq %rbp, 32(%rsp)
+  movq %rbx, 40(%rsp)
+  movq %r11, 48(%rsp)
+  movq %r10, 56(%rsp)
+  movq %r9,  64(%rsp)
+  movq %r8,  72(%rsp)
+  movq %rax, 80(%rsp)
+  movq %rcx, 88(%rsp)
+  movq %rdx, 96(%rsp)
+  movq %rsi, 104(%rsp)
+  movq %rdi, 112(%rsp)
+  // orig rax 120
+  // rip 128
+  xor %r14, %r14
+  movq %r14, 136(%rsp)
+  mov %cs, 136(%rsp)
+
   pushf
+  pop %r15
+  movq %r15, 144(%rsp)
+  movq %rsp, 152(%rsp)
 
-  // stack pointer? ignore
-  push %rsp
-  // push %ss (bad instruction)
-  // fsbase (?)
-  // gsbase (?)
-  // push %ds (bad instruction)
-  // push %es (bad instruction)
-  sub $40, %rsp
+  movq %r14, 160(%rsp)
+  mov %ss, 160(%rsp)
+  // fsbase 168
+  // gsbase 176
 
-  push %fs
-  push %gs
+  movq %r14, 184(%rsp)
+  movq %r14, 192(%rsp)
+  movq %r14, 200(%rsp)
+  movq %r14, 208(%rsp)
+
+  mov %ds, 184(%rsp)
+  mov %es, 192(%rsp)
+  mov %fs, 200(%rsp)
+  mov %gs, 208(%rsp)
+
   .endm
 
   //////////////////////////////////////////////////
   .macro m_pop_all_regs
-  pop %gs
-  pop %fs
 
-  add $48, %rsp
-
-  // ignore the stack pointer
-
+  // eflags
+  movq 144(%rsp), %rax
+  push %rax
   popf
 
-  add $24, %rsp
-  pop %rdi
-  pop %rsi
-  pop %rdx
-  pop %rcx
-  pop %rax
-  pop %r8
-  pop %r9
-  pop %r10
-  pop %r11
-  pop %rbx
-  pop %rbp
-  pop %r13
-  pop %r14
-  pop %r15
+  movq 0(%rsp),  %r15
+  movq 8(%rsp),  %r14
+  movq 16(%rsp), %r13
+  movq 24(%rsp), %r12
+  movq 32(%rsp), %rbp
+  movq 40(%rsp), %rbx
+  movq 48(%rsp), %r11
+  movq 56(%rsp), %r10
+  movq 64(%rsp), %r9
+  movq 72(%rsp), %r8
+  movq 80(%rsp), %rax
+  movq 88(%rsp), %rcx
+  movq 96(%rsp), %rdx
+  movq 104(%rsp), %rsi
+  movq 112(%rsp), %rdi
+  // orig rax 120
+  // rip 128
+  mov 136(%rsp), %cs
+
+  // eflags above
+
+  //movq %rsp, 152(%rsp)
+  mov 160(%rsp), %ss
+  // fsbase 168
+  // gsbase 176
+  mov 184(%rsp), %ds
+  mov 192(%rsp), %es
+  mov 200(%rsp), %fs
+  mov 208(%rsp), %gs
+
+  movq 152(%rsp), %rsp
+  add $728, %rsp
+
   .endm
 
 
@@ -118,28 +144,26 @@ red_asm_resume_eval_block:
 
   movq %rsi, %rsp
   m_pop_all_regs
-  ret
+  jmpq -448(%rsp)
 
-
-  .global red_asm_return_to_block
-red_asm_return_to_block:
-  mov %rax, %rsp
-  m_pop_all_regs
-  ret
 
   .global red_asm_start_tracing
 red_asm_start_tracing:
   // [null (old stack pointer), method_to_call, tracer_this, new_stack]
   sub $8, %rsp
   m_push_all_regs
-  mov %rsp, %rdi
-  mov %rcx, %rsp
+  movq %rsp, %rdi
+  movq %rcx, %rsp
   jmp *%rsi
 
 
 
   .global red_asm_compile_buff_near
 red_asm_compile_buff_near:
+  ret
+
+  .global red_asm_ret_only
+red_asm_ret_only:
   ret
 
 
