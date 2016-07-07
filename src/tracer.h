@@ -6,6 +6,8 @@ namespace redmagic {
 
   struct jump_instruction_info;
 
+#define TRACE_STACK_OFFSET 728  /* hardcode offset from this base stack */
+
   class Tracer {
   public:
     Tracer(std::shared_ptr<CodeBuffer> buffer);
@@ -24,7 +26,18 @@ namespace redmagic {
     void evaluate_instruction();
 
     void continue_program(mem_loc_t);
-    void write_interupt_block();
+    void write_interrupt_block();
+
+    inline register_t pop_stack() {
+      register_t r = *((register_t*)((mem_loc_t)regs_struct->rsp + TRACE_STACK_OFFSET + move_stack_by));
+      move_stack_by += sizeof(register_t);
+      return r;
+    }
+
+    inline void push_stack(register_t v) {
+      move_stack_by -= sizeof(register_t);
+      *((register_t*)((mem_loc_t)regs_struct->rsp + TRACE_STACK_OFFSET + move_stack_by)) = v;
+    }
 
 
 

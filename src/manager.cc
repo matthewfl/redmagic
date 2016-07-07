@@ -55,14 +55,17 @@ Manager::Manager() {
 }
 
 void Manager::begin_trace(void *id) {
-  assert(tracer == nullptr);
 
-  auto buff = make_shared<CodeBuffer>(4 * 1024 * 1024);
-  tracer = new Tracer(buff);
-  trace_id = id;
-  is_traced = true;
+  Tracer *l;
+  {
+    assert(tracer == nullptr);
+    auto buff = make_shared<CodeBuffer>(4 * 1024 * 1024);
+    l = tracer = new Tracer(buff);
+    trace_id = id;
+    is_traced = true;
+  }
 
-  tracer->Start();
+  l->Start();
 
 }
 

@@ -67,6 +67,7 @@ namespace redmagic {
   public:
     CodeBuffer(size_t size);
     CodeBuffer(mem_loc_t start, size_t size);
+    CodeBuffer();
 
     ~CodeBuffer();
 
@@ -89,10 +90,14 @@ namespace redmagic {
     void print();
 
     inline size_t getOffset() { return buffer_consumed; }
+    inline void setOffset(size_t o) { buffer_consumed = o; }
+    inline mem_loc_t getRawBuffer() { return (mem_loc_t)buffer; }
 
   public:
     template<typename SizeT> void replace_stump(SizeT from, SizeT to) {
+#ifndef NDEBUG
       uint8_t did_replace = 0;
+#endif
       SizeT current_value = 0;
       size_t location = 0;
       while(location < buffer_consumed) {
@@ -102,8 +107,13 @@ namespace redmagic {
           for(int i = sizeof(SizeT) - 1; i >= 0; i--) {
             writeByte(location - i, to >> 8 * (sizeof(SizeT) - i - 1));
           }
+#ifndef NDEBUG
           did_replace++;
+#else
+          break;
+#endif
         }
+        location++;
       }
       assert(did_replace == 1);
     }

@@ -95,10 +95,10 @@ def compile():
     # Run('{CC} -c src/asm.s -o build/asm.o'.format(
     #     CC=CC
     # ))
-    # Run('{CC} -c src/asm_snippets.s -o build/asm_snippets.o'.format(
-    #     CC=CC
-    # ))
-    Run('{CC} -c src/asm_interface.s -o build/asm_snippets.o'.format(
+    Run('{CC} -c src/asm_snippets.s -o build/asm_snippets.o'.format(
+        CC=CC
+    ))
+    Run('{CC} -c src/asm_interface.s -o build/asm_interface.o'.format(
         CC=CC
     ))
     after()

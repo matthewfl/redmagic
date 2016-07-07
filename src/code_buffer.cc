@@ -40,6 +40,14 @@ CodeBuffer::CodeBuffer(mem_loc_t start, size_t size):
 {
 }
 
+CodeBuffer::CodeBuffer():
+  buffer(nullptr),
+  size(0),
+  owns_buffer(false),
+  can_write_buffer(false),
+  buffer_consumed(0)
+{}
+
 CodeBuffer CodeBuffer::writeToEnd(CodeBuffer &other, long start, long end) {
   mem_loc_t position = 0;
   if(start > 0)
@@ -66,7 +74,7 @@ CodeBuffer CodeBuffer::writeToEnd(CodeBuffer &other, long start, long end) {
   //   }
   // }
 
-  CodeBuffer ret(self_start, buffer_consumed - self_start);
+  CodeBuffer ret((mem_loc_t)buffer + self_start, buffer_consumed - self_start);
   ret.can_write_buffer = true;
   return ret;
 }
