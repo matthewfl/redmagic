@@ -88,10 +88,11 @@
   mov 160(%rsp), %ss
   // fsbase 168
   // gsbase 176
-  mov 184(%rsp), %ds
-  mov 192(%rsp), %es
-  mov 200(%rsp), %fs
-  mov 208(%rsp), %gs
+
+  //mov 184(%rsp), %ds
+  //mov 192(%rsp), %es
+  //mov 200(%rsp), %fs
+  //mov 208(%rsp), %gs
 
   movq 152(%rsp), %rsp
   add $728, %rsp

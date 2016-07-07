@@ -18,7 +18,6 @@ red_asm_pop_all_regs_end:
   .global red_asm_resume_tracer_block_start
   .global red_asm_resume_tracer_block_end
 red_asm_resume_tracer_block_start:
-  sub $8, %rsp
   m_push_all_regs
   movq %rsp, %rax
   movq $0xfafafafafafafafa, %rsp

@@ -2,6 +2,7 @@
 #include "tracer.h"
 
 #include <iostream>
+#include <string.h>
 
 using namespace redmagic;
 using namespace std;
@@ -25,7 +26,7 @@ Tracer::Tracer(shared_ptr<CodeBuffer> buffer) {
   ud_set_input_hook(&disassm, udis_input_hook);
   ud_set_mode(&disassm, 64); // 64 bit
   ud_set_vendor(&disassm, UD_VENDOR_INTEL);
-  ud_set_syntax(&disassm, UD_SYN_INTEL);
+  ud_set_syntax(&disassm, UD_SYN_ATT);
 
 }
 
@@ -68,13 +69,20 @@ void Tracer::Run(void *other_stack) {
       jmp_info = decode_instruction();
       if(jmp_info.is_jump)
         break;
+      for(int i = 0;; i++) {
+        const ud_operand_t *opr = ud_insn_opr(&disassm, i);
+        if(opr == NULL) break;
+        assert(opr->base != UD_R_RIP && opr->index != UD_R_RIP);
+      }
       last_location = udis_loc;
       //CodeBuffer one_ins(ud_insn_off(&disassm), ud_insn_len(&disassm));
       //buffer->writeToEnd(one_ins);
     }
     if(current_location != last_location) {
-      CodeBuffer ins_set(current_location, last_location - current_location);
-      buffer->writeToEnd(ins_set);
+      {
+        CodeBuffer ins_set(current_location, last_location - current_location);
+        buffer->writeToEnd(ins_set);
+      }
 
       write_interrupt_block();
       continue_program(generated_location);
@@ -137,6 +145,44 @@ void Tracer::set_pc(uint64_t l) {
   ud_set_pc(&disassm, l);
 }
 
+redmagic::register_t Tracer::get_opr_value(const ud_operand_t *opr) {
+  switch(opr->type) {
+  case UD_OP_IMM:
+  case UD_OP_CONST:
+    switch(opr->size) {
+      // not sure if should return these signed
+    case 8:
+      return opr->lval.sbyte;
+    case 16:
+      return opr->lval.sword;
+    case 32:
+      return opr->lval.sdword;
+    case 64:
+      return opr->lval.sqword;
+    }
+  case UD_OP_JIMM:
+    switch(opr->size) {
+    case 8:
+      return opr->lval.sbyte + udis_loc;
+    case 16:
+      return opr->lval.sword + udis_loc;
+    case 32:
+      return opr->lval.sdword + udis_loc;
+    case 64:
+      return opr->lval.sqword + udis_loc;
+    }
+  case UD_OP_REG: {
+    int r = ud_register_to_sys(opr->base);
+    assert(r != -1);
+    return ((register_t*)regs_struct)[r];
+  }
+  case UD_OP_MEM:
+  case UD_OP_PTR:
+    assert(0);
+  }
+
+}
+
 struct jump_instruction_info Tracer::decode_instruction() {
 
   struct jump_instruction_info ret;
@@ -168,6 +214,9 @@ struct jump_instruction_info Tracer::decode_instruction() {
       break;
     case 16:
       ret.local_jump_location = opr->lval.sword;
+      break;
+    case 32:
+      ret.local_jump_location = opr->lval.sdword;
       break;
     default:
       assert(0);
@@ -203,6 +252,9 @@ struct jump_instruction_info Tracer::decode_instruction() {
         break;
       case 16:
         ret.local_jump_location = opr->lval.sword;
+        break;
+      case 32:
+        ret.local_jump_location = opr->lval.sdword;
         break;
       default:
         assert(0);
@@ -241,9 +293,63 @@ struct jump_instruction_info Tracer::decode_instruction() {
 
 }
 
+
+// page 522 in intel manual
+struct conditional_jumps_opts {
+  enum ud_mnemonic_code code;
+
+  uint8_t true_encoding[4];
+  uint8_t true_encoding_len;
+
+  enum ud_mnemonic_code false_inst;
+
+  uint32_t equals_zero; // all bits set must equal zero
+  uint32_t equals_one; // all bits set must equal one
+  //uint32_t or_equals_zero; // one bit must equal zero
+  //uint32_t or_equals_one; // one bit must equal one
+  uint32_t is_equals; // all bits set must equal eachother
+  uint32_t not_equals; // all bits set must not equal eachother
+
+  bool inverted; // if we want the expression to be false... b/c f-me
+
+};
+
+enum eflags_bits {
+  eflag_cf = 0,
+  eflag_pf = 1 << 2,
+  eflag_af = 1 << 4,
+  eflag_zf = 1 << 6,
+  eflag_sf = 1 << 7,
+  eflag_tf = 1 << 8,
+  eflag_if = 1 << 9,
+  eflag_df = 1 << 10,
+  eflag_of = 1 << 11,
+};
+
+struct conditional_jumps_opts jump_opts[] = {
+  { UD_Ijo,  { 0x0F, 0x80, 0xCD }, 3, UD_Ijno, 0, eflag_of, 0, 0, 0 },
+  { UD_Ijno, { 0x0F, 0x81, 0xCD }, 3, UD_Ijo,  eflag_of, 0, 0, 0, 0 },
+  { UD_Ijb,  { 0x0F, 0x82, 0xCD }, 3, UD_Ijae, 0, eflag_cf, 0, 0, 0 },
+  { UD_Ijae, { 0x0F, 0x83, 0xCD }, 3, UD_Ijb,  eflag_cf, 0, 0, 0, 0 },
+  { UD_Ijz,  { 0x0F, 0x84, 0xCD }, 3, UD_Ijnz, 0, eflag_zf, 0, 0, 0 },
+  { UD_Ijnz, { 0x0F, 0x85, 0xCD }, 3, UD_Ijz,  eflag_zf, 0, 0, 0, 0 },
+  { UD_Ijbe, { 0x0F, 0x86, 0xCD }, 3, UD_Ija,  eflag_cf | eflag_zf, 0, 0, 0, 1 },
+  { UD_Ija,  { 0x0F, 0x87, 0xCD }, 3, UD_Ijbe, eflag_cf | eflag_zf, 0, 0, 0, 0 },
+  { UD_Ijs,  { 0x0F, 0x88, 0xCD }, 3, UD_Ijns, 0, eflag_sf, 0, 0, 0 },
+  { UD_Ijns, { 0x0F, 0x89, 0xCD }, 3, UD_Ijs,  eflag_sf, 0, 0, 0, 0 },
+  { UD_Ijp,  { 0x0F, 0x8A, 0xCD }, 3, UD_Ijnp, 0, eflag_pf, 0, 0, 0 },
+  { UD_Ijnp, { 0x0F, 0x8B, 0xCD }, 3, UD_Ijp,  eflag_pf, 0, 0, 0, 0 },
+  { UD_Ijl,  { 0x0F, 0x8C, 0xCD }, 3, UD_Ijge, 0, 0, eflag_sf | eflag_of, 0 },
+  { UD_Ijge, { 0x0F, 0x8D, 0xCD }, 3, UD_Ijl,  0, 0, eflag_sf | eflag_of, 0, 0 },
+  { UD_Ijle, { 0x0F, 0x8E, 0xCD }, 3, UD_Ijg,  eflag_zf, 0, eflag_sf | eflag_of, 0, 1 },
+  { UD_Ijg,  { 0x0F, 0x8F, 0xCD }, 3, UD_Ijle, eflag_zf, 0, eflag_sf | eflag_of, 0, 0 }
+};
+
 void Tracer::evaluate_instruction() {
 
-  switch(ud_insn_mnemonic(&disassm)) {
+  enum ud_mnemonic_code mnem = ud_insn_mnemonic(&disassm);
+
+  switch(mnem) {
   case UD_Ijo:
   case UD_Ijno:
   case UD_Ijb:
@@ -260,6 +366,70 @@ void Tracer::evaluate_instruction() {
   case UD_Ijge:
   case UD_Ijle:
   case UD_Ijg: {
+    int64_t joffset;
+    const ud_operand_t *opr = ud_insn_opr(&disassm, 0);
+    assert(opr->type == UD_OP_JIMM);
+    switch(opr->size) {
+    case 8:
+      joffset = opr->lval.sbyte;
+      break;
+    case 16:
+      joffset = opr->lval.sword;
+      break;
+    case 32:
+      joffset = opr->lval.sdword;
+      break;
+    default:
+      assert(0);
+    }
+
+    register_t eflags = regs_struct->eflags;
+    mem_loc_t alternate_instructions; // instructions for the branch that we didn't take
+    enum ud_mnemonic_code emit;
+
+    for(int i = 0; i < sizeof(jump_opts); i++) {
+      if(jump_opts[i].code == mnem) {
+        bool expression =
+          (!jump_opts[i].equals_zero || (jump_opts[i].equals_zero & eflags) == 0) &&
+          (!jump_opts[i].equals_one || (jump_opts[i].equals_one & ~eflags) == 0) &&
+          // (!jump_opts[i].or_equals_zero || (bits_set(jump_opts[i].or_equals_zero & eflags)) <= 1) &&
+          // (!jump_opts[i].or_equals_one || (bits_set(jump_opts[i].or_equals_one & eflags)) >= 1) &&
+          (!jump_opts[i].is_equals || (bits_set(jump_opts[i].is_equals & eflags) % 2) == 0) &&
+          (!jump_opts[i].not_equals || (bits_set(jump_opts[i].not_equals & eflags) % 2) == 1);
+        if(expression != jump_opts[i].inverted) {
+          // this expression is true which means that we are taking the jump
+          alternate_instructions = udis_loc;
+          set_pc(udis_loc + joffset);
+          emit = jump_opts[i].false_inst;
+        } else {
+          emit = mnem;
+          alternate_instructions = udis_loc + joffset;
+        }
+        break;
+      }
+    }
+
+    uint8_t lbuffer[16] = {
+      0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa,
+      0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa
+    };
+
+    uint8_t buffer_used = 0;
+
+    for(int i = 0; i < sizeof(jump_opts); i++) {
+      if(jump_opts[i].code == emit) {
+        memcpy(lbuffer, jump_opts[i].true_encoding, jump_opts[i].true_encoding_len);
+        buffer_used += jump_opts[i].true_encoding_len;
+
+        buffer_used += 4; // the relative jump address
+        CodeBuffer buff((mem_loc_t)&lbuffer, buffer_used);
+        auto written = buffer->writeToEnd(buff);
+        // TODO: make written do something to replace to jump address
+        return;
+      }
+    }
+
+    // something went wrong, we should not be here
     assert(0);
   }
   case UD_Ijcxz:

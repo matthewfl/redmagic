@@ -40,6 +40,8 @@ namespace redmagic {
     }
 
 
+    register_t get_opr_value(const ud_operand_t *opr);
+
 
     // static void tracer_start_cb(intptr_t ptr);
 

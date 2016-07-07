@@ -140,6 +140,111 @@ namespace redmagic {
   }
 
 
+  // convert a register from udis to sys/reg.h
+  static int ud_register_to_sys(ud_type t) {
+    switch(t) {
+    case UD_R_R15B:
+    case UD_R_R15W:
+    case UD_R_R15D:
+    case UD_R_R15:
+      return R15;
+    case UD_R_R14B:
+    case UD_R_R14W:
+    case UD_R_R14D:
+    case UD_R_R14:
+      return R14;
+    case UD_R_R13B:
+    case UD_R_R13W:
+    case UD_R_R13D:
+    case UD_R_R13:
+      return R13;
+    case UD_R_R12B:
+    case UD_R_R12W:
+    case UD_R_R12D:
+    case UD_R_R12:
+      return R12;
+    case UD_R_CH: // ??
+    case UD_R_BP:
+    case UD_R_EBP:
+    case UD_R_RBP:
+      return RBP;
+    case UD_R_BL:
+    case UD_R_BX:
+    case UD_R_EBX:
+    case UD_R_RBX:
+      return RBX;
+    case UD_R_R11B:
+    case UD_R_R11W:
+    case UD_R_R11D:
+    case UD_R_R11:
+      return R11;
+    case UD_R_R10B:
+    case UD_R_R10W:
+    case UD_R_R10D:
+    case UD_R_R10:
+      return R10;
+    case UD_R_R9B:
+    case UD_R_R9W:
+    case UD_R_R9D:
+    case UD_R_R9:
+      return R9;
+    case UD_R_R8B:
+    case UD_R_R8W:
+    case UD_R_R8D:
+    case UD_R_R8:
+      return R8;
+    case UD_R_AL:
+    case UD_R_AX:
+    case UD_R_EAX:
+    case UD_R_RAX:
+      return RAX;
+    case UD_R_CL:
+    case UD_R_CX:
+    case UD_R_ECX:
+    case UD_R_RCX:
+      return RCX;
+    case UD_R_DL:
+    case UD_R_DX:
+    case UD_R_EDX:
+    case UD_R_RDX:
+      return RDX;
+    case UD_R_DH:
+    case UD_R_SI:
+    case UD_R_ESI:
+    case UD_R_RSI:
+      return RSI;
+    case UD_R_BH:
+    case UD_R_DI:
+    case UD_R_EDI:
+    case UD_R_RDI:
+      return RDI;
+      // orig rax
+    case UD_R_RIP:
+      // instrunction pointer??
+      return RIP;
+    case UD_R_CS:
+      return CS;
+      // eflags not directly accessable, use pushf and popf
+    case UD_R_AH:
+    case UD_R_SP:
+    case UD_R_ESP:
+    case UD_R_RSP:
+      return RSP;
+      // fsbase, gsbase
+    case UD_R_DS:
+      return DS;
+    case UD_R_ES:
+      return ES;
+    case UD_R_FS:
+      return FS;
+    case UD_R_GS:
+      return GS;
+    default:
+      return -1;
+    }
+  }
+
+
 
 }
 
