@@ -105,6 +105,9 @@
   // [all cap name, %reg name, reg struct offset]
 #define MAIN_REGISTERS(METHOD)  \
   METHOD(R15, %r15, 0)        \
+  MAIN_REGISTERS_NOT_R15(METHOD)
+
+#define MAIN_REGISTERS_NOT_R15(METHOD) \
   METHOD(R14, %r14, 8)        \
   METHOD(R13, %r13, 16)       \
   METHOD(R12, %r12, 24)       \

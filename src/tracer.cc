@@ -162,6 +162,8 @@ namespace {
   METHOD(RSI, %rsi, 104)      \
   METHOD(RDI, %rdi, 112)
 
+#define NUMBER_MAIN_REGISTERS 15
+
 struct group_register_instructions_s {
   int register_index;
   CodeBuffer instruction;
@@ -194,6 +196,29 @@ static group_register_instructions_s test_register_instructions[] = {
   MAIN_REGISTERS(LOAD_TEST_REGISTER2)
 };
 
+#define LOAD_WRITE_MEM_REGISTER1(CNAME, RNAME, OFFSET) \
+  ASM_BLOCK(write_reg_to_addr_ ## CNAME)
+
+#define LOAD_WRITE_MEM_REGISTER2(CNAME, RNAME, OFFSET) \
+  { CNAME, cb_asm_write_reg_to_addr_ ## CNAME } ,
+
+MAIN_REGISTERS(LOAD_WRITE_MEM_REGISTER1)
+
+static group_register_instructions_s write_register_mem_instruction[] = {
+  MAIN_REGISTERS(LOAD_WRITE_MEM_REGISTER2)
+};
+
+#define LOAD_READ_MEM_REGISTER1(CNAME, RNAME, OFFSET) \
+  ASM_BLOCK(write_mem_to_reg_ ## CNAME)
+
+#define LOAD_READ_MEM_REGISTER2(CNAME, RNAME, OFFSET) \
+  { CNAME, cb_asm_write_mem_to_reg_ ## CNAME } ,
+
+MAIN_REGISTERS(LOAD_READ_MEM_REGISTER1)
+
+static group_register_instructions_s read_mem_register_instruction[] = {
+  MAIN_REGISTERS(LOAD_READ_MEM_REGISTER2)
+};
 
 ASM_BLOCK(pop_stack);
 ASM_BLOCK(push_stack);
@@ -709,8 +734,23 @@ void Tracer::replace_rip_instruction() {
       return;
     }
     assert(0);
+  }
 
-
+  case UD_Imov: {
+    const ud_operand_t *opr1 = ud_insn_opr(&disassm, 0); // dest address
+    const ud_operand_t *opr2 = ud_insn_opr(&disassm, 1); // source address
+    assert(opr1 != NULL && opr2 != NULL);
+    if(opr2->base == UD_R_RIP && opr2->index == UD_NONE) {
+      // then we are just reading some offset from this address
+      opr_value val = get_opr_value(opr2);
+      assert(val.is_ptr);
+      assert(opr1->type == UD_OP_REG);
+      int dest = ud_register_to_sys(opr1->base);
+      assert(dest != -1 && dest < NUMBER_MAIN_REGISTERS);
+      auto written = buffer->writeToEnd(read_mem_register_instruction[dest].instruction);
+      written.replace_stump<uint64_t>(0xfafafafafafafafa, val.address);
+      return;
+    }
     assert(0);
   }
   default:

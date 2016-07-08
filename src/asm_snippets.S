@@ -114,6 +114,7 @@ red_asm_count_offset:
   movq 1b(%rip), %r15
   inc %r15
   movq %r15, 1b(%rip)
+  movq -728(%rsp), %r15
 red_asm_count_end:
 
 #define MAKE_SET_BLOCK(CNAME, RNAME, OFFSET)     \
@@ -144,6 +145,52 @@ red_asm_test_reg_ ## CNAME ## _start:          NL \
 red_asm_test_reg_ ## CNAME ## _end:            NL NL
 
 MAIN_REGISTERS(MAKE_TEST_REG_BLOCK)
+
+
+#define MAKE_WRITE_REG_TO_ADDR(CNAME, RNAME, OFFSET) \
+  .global red_asm_write_reg_to_addr_ ## CNAME ## _start NL \
+  .global red_asm_write_reg_to_addr_ ## CNAME ## _end   NL \
+red_asm_write_reg_to_addr_ ## CNAME ## _start:          NL \
+  movq %r15, -728(%rsp)                                 NL \
+  movq $0xfafafafafafafafa, %r15                        NL \
+  movq RNAME, (%r15)                                    NL \
+  movq -728(%rsp), %r15                                 NL \
+red_asm_write_reg_to_addr_ ## CNAME ## _end:            NL NL
+
+MAIN_REGISTERS_NOT_R15(MAKE_WRITE_REG_TO_ADDR)
+
+  .global red_asm_write_reg_to_addr_R15_start
+  .global red_asm_write_reg_to_addr_R15_end
+red_asm_write_reg_to_addr_R15_start:
+  movq %r14, -728(%rsp)
+  movq $0xfafafafafafafafa, %r14
+  movq %r15, (%r14)
+  movq -728(%rsp), %r14
+red_asm_write_reg_to_addr_R15_end:
+
+
+#define MAKE_READ_ADDR_TO_REG(CNAME, RNAME, OFFSET) \
+  .global red_asm_write_mem_to_reg_ ## CNAME ## _start NL \
+  .global red_asm_write_mem_to_reg_ ## CNAME ## _end   NL \
+red_asm_write_mem_to_reg_ ## CNAME ## _start:          NL \
+  movq %r15, -728(%rsp)                                 NL \
+  movq $0xfafafafafafafafa, %r15                        NL \
+  movq (%r15), RNAME                                    NL \
+  movq -728(%rsp), %r15                                 NL \
+red_asm_write_mem_to_reg_ ## CNAME ## _end:            NL NL
+
+MAIN_REGISTERS_NOT_R15(MAKE_READ_ADDR_TO_REG)
+
+  .global red_asm_write_mem_to_reg_R15_start
+  .global red_asm_write_mem_to_reg_R15_end
+red_asm_write_mem_to_reg_R15_start:
+  movq %r14, -728(%rsp)
+  movq $0xfafafafafafafafa, %r14
+  movq (%r14), %r15
+  movq -728(%rsp), %r14
+red_asm_write_mem_to_reg_R15_end:
+
+
 
 
 
