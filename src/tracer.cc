@@ -6,6 +6,8 @@
 #include <iostream>
 #include <string.h>
 
+#include <dlfcn.h>
+
 using namespace redmagic;
 using namespace std;
 
@@ -69,10 +71,18 @@ void Tracer::Run(void *other_stack) {
     last_location = current_location = udis_loc;
   processes_instructions:
     while(ud_disassemble(&disassm)) {
-      cout << "[0x" << std::hex << ud_insn_off(&disassm) << std::dec << "] " << ud_insn_asm(&disassm) << "\t" << ud_insn_hex(&disassm) <<  endl << flush;
+
+      Dl_info dlinfo;
+      if(!dladdr((void*)ud_insn_off(&disassm), &dlinfo)) {
+        dlinfo.dli_sname = ".";
+      }
+
+
+      cout << "[0x" << std::hex << ud_insn_off(&disassm) << std::dec << " " << dlinfo.dli_sname << "] " << ud_insn_asm(&disassm) << "\t" << ud_insn_hex(&disassm) <<  endl << flush;
       jmp_info = decode_instruction();
       if(jmp_info.is_jump)
         goto run_instructions;
+
       for(int i = 0;; i++) {
         const ud_operand_t *opr = ud_insn_opr(&disassm, i);
         if(opr == NULL)
@@ -87,6 +97,7 @@ void Tracer::Run(void *other_stack) {
       //CodeBuffer one_ins(ud_insn_off(&disassm), ud_insn_len(&disassm));
       //buffer->writeToEnd(one_ins);
     }
+    cout << flush;
   run_instructions:
     if(current_location != last_location) {
       {
@@ -102,7 +113,6 @@ void Tracer::Run(void *other_stack) {
     if(rip_used) {
       generated_location = buffer->getRawBuffer() + buffer->getOffset();
       replace_rip_instruction();
-      rip_used = false;
       // we have to evaluate this instruction which has been written
       write_interrupt_block();
       continue_program(generated_location);
@@ -110,6 +120,7 @@ void Tracer::Run(void *other_stack) {
       // this is a jump instruction that we are evaluating and replacing
       evaluate_instruction();
     }
+    rip_used = false;
 
 
   }
@@ -631,6 +642,14 @@ void Tracer::evaluate_instruction() {
       auto written = compiler.finalize();
 
       set_pc(rv);
+    } else if(opr->type == UD_OP_MEM) {
+      if(opr->base == UD_R_RIP) {
+        // then we are going to assume that this is a constant value since this is relative to the rip
+        auto v = get_opr_value(opr);
+        set_pc(*(mem_loc_t*)v.address);
+      } else {
+        assert(0);
+      }
     }
     else {
       assert(0);
@@ -758,8 +777,12 @@ void Tracer::replace_rip_instruction() {
 
       SimpleCompiler compiler(buffer.get());
       compiler.MemToRegister(val.address, dest);
-
+      return;
     }
+    assert(0);
+  }
+
+  case UD_Ijmp: {
     assert(0);
   }
   default:

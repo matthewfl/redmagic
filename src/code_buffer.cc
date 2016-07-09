@@ -49,6 +49,7 @@ CodeBuffer::CodeBuffer():
 {}
 
 CodeBuffer CodeBuffer::writeToEnd(CodeBuffer &other, long start, long end) {
+  assert(external_trampolines == nullptr); // we can't relocate this without understanding the code
   mem_loc_t position = 0;
   if(start > 0)
     position = start;

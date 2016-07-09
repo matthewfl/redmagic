@@ -73,16 +73,26 @@ namespace redmagic {
     ~CodeBuffer();
 
     //void *getBuffer() { return buffer; }
-    size_t getSize() { return size; }
+    inline size_t getSize() { return size - trampolines_size + external_trampolines_size; }
+    inline size_t getFree() { return size - trampolines_size - buffer_consumed; }
+
+    inline uint8_t* whereByte(mem_loc_t offset) {
+      assert(offset < size - trampolines_size + external_trampolines_size);
+      if(offset < size - trampolines_size) {
+        return buffer + offset;
+      } else if(offset - size + trampolines_size < external_trampolines_size) {
+        return external_trampolines + offset - size + trampolines_size;
+      }
+      assert(0);
+    }
 
     inline uint8_t readByte(mem_loc_t offset) {
-      assert(offset < size);
-      return buffer[offset];
+      return *whereByte(offset);
     }
     inline void writeByte(mem_loc_t offset, uint8_t val) {
       assert(offset < size);
       assert(can_write_buffer);
-      buffer[offset] = val;
+      *whereByte(offset) = val;
     }
 
   public:
@@ -121,10 +131,14 @@ namespace redmagic {
 
   private:
     uint8_t *buffer;
+    size_t trampolines_size = 0;  // trampolines on the end of this buffer
     size_t size;
     size_t buffer_consumed;
     bool owns_buffer;
     bool can_write_buffer;
+
+    uint8_t *external_trampolines = nullptr;
+    size_t external_trampolines_size = 0;
 
     friend class SimpleCompiler;
     // struct rebind_jumps {

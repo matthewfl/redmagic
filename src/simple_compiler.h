@@ -70,6 +70,10 @@ namespace redmagic {
 
     void TestRegister(int reg, register_t val);
 
+    mem_loc_t MakeResumeTraceBlock(mem_loc_t tracer_base_ptr, mem_loc_t resume_pc);
+
+    uint64_t* MakeCounter();
+
   private:
     CodeBuffer *buffer;
     mem_loc_t buffer_cursor;
@@ -78,11 +82,17 @@ namespace redmagic {
     uint64_t clobbered_registers = 0;
     // registers that our program is using for something
     // so dont reallocate these
-    uint64_t regs_using = 0;;
+    uint64_t regs_using = 0;
+    uint32_t trampolines_used = 0;
 
     int32_t move_stack_by = 0;
 
     asmjit::StaticRuntime runtime;
+
+    void set_label_address(const asmjit::Label &label, mem_loc_t addr);
+
+  public:
+    virtual size_t _relocCode(void *_dst, asmjit::Ptr baseAddress) const noexcept override;
 
   };
 

@@ -117,6 +117,21 @@ red_asm_count_offset:
   movq -728(%rsp), %r15
 red_asm_count_end:
 
+
+  .global red_asm_push_all_regs_start
+  .global red_asm_push_all_regs_end
+red_asm_push_all_regs_start:
+  m_push_all_regs
+red_asm_push_all_regs_end:
+
+
+  .global red_asm_pop_all_regs_start
+  .global red_asm_pop_all_regs_end
+red_asm_pop_all_regs_start:
+  m_pop_all_regs
+red_asm_pop_all_regs_end:
+
+
 #define MAKE_SET_BLOCK(CNAME, RNAME, OFFSET)     \
   .global red_asm_set_reg_ ## CNAME ## _start NL \
   .global red_asm_set_reg_ ## CNAME ## _end   NL \

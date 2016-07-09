@@ -1,19 +1,6 @@
 #include "asm_macros.S"
 
 
-  .global red_asm_push_all_regs_start
-  .global red_asm_push_all_regs_end
-red_asm_push_all_regs_start:
-  m_push_all_regs
-red_asm_push_all_regs_end:
-
-
-  .global red_asm_pop_all_regs_start
-  .global red_asm_pop_all_regs_end
-red_asm_pop_all_regs_start:
-  m_pop_all_regs
-red_asm_pop_all_regs_end:
-
 
   .global red_asm_resume_tracer_block_start
   .global red_asm_resume_tracer_block_end
