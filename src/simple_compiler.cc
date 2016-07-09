@@ -43,7 +43,7 @@ void SimpleCompiler::restore_registers() {
 }
 
 void SimpleCompiler::protect_register(int id) {
-  if(clobbered_registers & (1 << id) == 0) {
+  if((clobbered_registers & (1 << id)) == 0) {
     mov(x86::ptr(x86::rsp, -TRACE_STACK_OFFSET + id * 8 + move_stack_by), get_register_from_id(id));
     clobbered_registers |= 1 << id;
   }
@@ -64,7 +64,6 @@ const asmjit::X86GpReg& SimpleCompiler::get_scratch_register() {
     if((regs_using & (1 << indx)) == 0) {
       protect_register(indx);
       regs_using |= 1 << indx;
-      clobbered_registers |= 1 << indx;
       return get_register_from_id(indx);
     }
   }
@@ -127,11 +126,26 @@ uint64_t* SimpleCompiler::MakeCounter() {
   auto scr = get_scratch_register();
   //auto scr2 = get_scratch_register();
   //mov(scr2, imm_ptr(cptr));
-  mov(scr, x86::ptr(label));
-  inc(scr);
-  mov(x86::ptr(label), scr);
+  // mov(scr, x86::ptr(label));
+  // inc(scr);
+  // mov(x86::ptr(label), scr);
+
+  // TODO: make this add to this location
+  add(x86::ptr(x86::rip, 10), 1);
+  assert(0);
+
   return cptr;
 }
+
+void SimpleCompiler::PushMemoryLocationValue(mem_loc_t where) {
+  auto scr = get_scratch_register();
+  mov(scr, imm_u(where));
+  // TODO: bug in asmjit prevents push from working directly with pointers???
+  mov(scr, x86::ptr(scr));
+  push(scr);
+  move_stack_by -= sizeof(register_t);
+}
+
 
 mem_loc_t SimpleCompiler::MakeResumeTraceBlock(mem_loc_t tracer_base_ptr, mem_loc_t resume_pc) {
   SimpleCompiler resume_block(buffer);

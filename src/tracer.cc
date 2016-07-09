@@ -63,7 +63,7 @@ void Tracer::Run(void *other_stack) {
   mem_loc_t generated_location;
   struct jump_instruction_info jmp_info;
   bool rip_used = false;
-
+  uint64_t icount = 0;
   while(true) {
     assert(before_stack == 0xdeadbeef);
     assert(after_stack == 0xdeadbeef);
@@ -73,12 +73,14 @@ void Tracer::Run(void *other_stack) {
     while(ud_disassemble(&disassm)) {
 
       Dl_info dlinfo;
-      if(!dladdr((void*)ud_insn_off(&disassm), &dlinfo)) {
-        dlinfo.dli_sname = ".";
-      }
+      dladdr((void*)ud_insn_off(&disassm), &dlinfo);
 
 
-      cout << "[0x" << std::hex << ud_insn_off(&disassm) << std::dec << " " << dlinfo.dli_sname << "] " << ud_insn_asm(&disassm) << "\t" << ud_insn_hex(&disassm) <<  endl << flush;
+      // cout << "[0x" << std::hex << ud_insn_off(&disassm) << std::dec << " " << dlinfo.dli_sname << "] " << ud_insn_asm(&disassm) << "\t" << ud_insn_hex(&disassm) <<  endl << flush;
+      auto ins_loc = ud_insn_off(&disassm);
+
+      printf("%8i\t%-35s [%#016lx %-40s] %s\n", ++icount, ud_insn_asm(&disassm), ins_loc, dlinfo.dli_sname, ud_insn_hex(&disassm));
+
       jmp_info = decode_instruction();
       if(jmp_info.is_jump)
         goto run_instructions;
@@ -87,7 +89,9 @@ void Tracer::Run(void *other_stack) {
         const ud_operand_t *opr = ud_insn_opr(&disassm, i);
         if(opr == NULL)
           break;
-        if(opr->base == UD_R_RIP || opr->index == UD_R_RIP) {
+        assert(opr->type != UD_OP_PTR); // ?
+        if((opr->type == UD_OP_REG || opr->type == UD_OP_MEM) &&
+           (opr->base == UD_R_RIP || opr->index == UD_R_RIP)) {
           rip_used = true;
           goto run_instructions;
         }
@@ -646,6 +650,13 @@ void Tracer::evaluate_instruction() {
       if(opr->base == UD_R_RIP) {
         // then we are going to assume that this is a constant value since this is relative to the rip
         auto v = get_opr_value(opr);
+        mem_loc_t t = *(mem_loc_t*)v.address;
+        if(t == udis_loc) {
+          // this is what it looks like when there is some dynamic linked library and it is going to resolve its address
+          // and the store it in the memory location that we have just read from
+
+          printf("=============TODO\n");
+        }
         set_pc(*(mem_loc_t*)v.address);
       } else {
         assert(0);
@@ -780,6 +791,16 @@ void Tracer::replace_rip_instruction() {
       return;
     }
     assert(0);
+  }
+
+  case UD_Ipush: {
+    const ud_operand *opr1 = ud_insn_opr(&disassm, 0);
+    opr_value val = get_opr_value(opr1);
+    assert(val.is_ptr);
+    SimpleCompiler compiler(buffer.get());
+    compiler.PushMemoryLocationValue(val.address);
+    auto written = compiler.finalize();
+    return;
   }
 
   case UD_Ijmp: {

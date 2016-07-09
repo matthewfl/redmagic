@@ -67,6 +67,7 @@ namespace redmagic {
     void MemToRegister(mem_loc_t where, int reg);
     void RegisterToMem(int reg, mem_loc_t where);
     void SetRegister(int reg, register_t val);
+    void PushMemoryLocationValue(mem_loc_t where);
 
     void TestRegister(int reg, register_t val);
 
