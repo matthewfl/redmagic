@@ -33,6 +33,7 @@ namespace redmagic {
   class Manager;
   class CodeBuffer;
   class Tracer;
+  class SimpleCompiler;
 
   typedef decltype(((struct user_regs_struct*)(NULL))->r15) register_t;
   typedef uint64_t mem_loc_t; // a memory location in the debugged program
@@ -124,6 +125,8 @@ namespace redmagic {
     size_t buffer_consumed;
     bool owns_buffer;
     bool can_write_buffer;
+
+    friend class SimpleCompiler;
     // struct rebind_jumps {
     //   mem_loc_t buffer_offset;
     //   // suppose that this could disappear so might not be best idea to deallcate these and reallocate?

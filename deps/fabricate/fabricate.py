@@ -140,8 +140,12 @@ def relative_to_abs_paths(args):
         ret.append(' '.join(s))
     return ret
 
-def Shell(args, **kwargs):
-    return shell(*shlex.split(args), **kwargs)
+def Shell(args, silent=False, **kwargs):
+    #if silent:
+    return shell(*shlex.split(args), silent=silent, **kwargs)
+    # import ipdb; ipdb.set_trace();
+    # pwd = os.path.abspath('.')
+    # return run('sh', '-c', 'cd {} && {}'.format(pwd, args))
 
 def shell(*args, **kwargs):
     r""" Run a command: program name is given in first arg and command line

@@ -191,8 +191,5 @@ red_asm_write_mem_to_reg_R15_start:
 red_asm_write_mem_to_reg_R15_end:
 
 
-
-
-
 // we don't need executable stack
   .section .note.GNU-stack,"",%progbits

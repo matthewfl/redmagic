@@ -6,11 +6,13 @@
   * N.L represents a new line in the macro expansion
   */
 
+#include "constants.h"
+
   ////////////////////////////////////////////////////
   .macro  m_push_all_regs
   // should match sys/regs.h, sys/user.h
   // 216 bytes for the struct, and then offset by 512 from the current stack
-  sub $728, %rsp
+  sub $TRACE_STACK_OFFSET, %rsp
 
   movq %r15, 0(%rsp)
   movq %r14, 8(%rsp)
@@ -97,7 +99,7 @@
   //mov 208(%rsp), %gs
 
   movq 152(%rsp), %rsp
-  add $728, %rsp
+  add $TRACE_STACK_OFFSET, %rsp
 
   .endm
 

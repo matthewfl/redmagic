@@ -1,6 +1,8 @@
 #include "jit_internal.h"
 #include "tracer.h"
 
+#include "simple_compiler.h"
+
 #include <iostream>
 #include <string.h>
 
@@ -169,56 +171,56 @@ struct group_register_instructions_s {
   CodeBuffer instruction;
 };
 
-#define LOAD_SET_REGISTER1(CNAME, RNAME, OFFSET)  \
-  ASM_BLOCK(set_reg_ ## CNAME)
+// #define LOAD_SET_REGISTER1(CNAME, RNAME, OFFSET)  \
+//   ASM_BLOCK(set_reg_ ## CNAME)
 
-#define LOAD_SET_REGISTER2(CNAME, RNAME, OFFSET)    \
-  {                                                 \
-    CNAME , /* ref sys/regs.h */                    \
-      cb_asm_set_reg_ ## CNAME                     \
-      } ,
+// #define LOAD_SET_REGISTER2(CNAME, RNAME, OFFSET)    \
+//   {                                                 \
+//     CNAME , /* ref sys/regs.h */                    \
+//       cb_asm_set_reg_ ## CNAME                     \
+//       } ,
 
-MAIN_REGISTERS(LOAD_SET_REGISTER1)
+// MAIN_REGISTERS(LOAD_SET_REGISTER1)
 
-static group_register_instructions_s set_register_instructions[] = {
-  MAIN_REGISTERS(LOAD_SET_REGISTER2)
-};
+// static group_register_instructions_s set_register_instructions[] = {
+//   MAIN_REGISTERS(LOAD_SET_REGISTER2)
+// };
 
-#define LOAD_TEST_REGISTER1(CNAME, RNAME, OFFSET) \
-  ASM_BLOCK(test_reg_ ## CNAME)
+// #define LOAD_TEST_REGISTER1(CNAME, RNAME, OFFSET) \
+//   ASM_BLOCK(test_reg_ ## CNAME)
 
-#define LOAD_TEST_REGISTER2(CNAME, RNAME, OFFSET) \
-  { CNAME, cb_asm_test_reg_ ## CNAME } ,
+// #define LOAD_TEST_REGISTER2(CNAME, RNAME, OFFSET) \
+//   { CNAME, cb_asm_test_reg_ ## CNAME } ,
 
-MAIN_REGISTERS(LOAD_TEST_REGISTER1)
+// MAIN_REGISTERS(LOAD_TEST_REGISTER1)
 
-static group_register_instructions_s test_register_instructions[] = {
-  MAIN_REGISTERS(LOAD_TEST_REGISTER2)
-};
+// static group_register_instructions_s test_register_instructions[] = {
+//   MAIN_REGISTERS(LOAD_TEST_REGISTER2)
+// };
 
-#define LOAD_WRITE_MEM_REGISTER1(CNAME, RNAME, OFFSET) \
-  ASM_BLOCK(write_reg_to_addr_ ## CNAME)
+// #define LOAD_WRITE_MEM_REGISTER1(CNAME, RNAME, OFFSET) \
+//   ASM_BLOCK(write_reg_to_addr_ ## CNAME)
 
-#define LOAD_WRITE_MEM_REGISTER2(CNAME, RNAME, OFFSET) \
-  { CNAME, cb_asm_write_reg_to_addr_ ## CNAME } ,
+// #define LOAD_WRITE_MEM_REGISTER2(CNAME, RNAME, OFFSET) \
+//   { CNAME, cb_asm_write_reg_to_addr_ ## CNAME } ,
 
-MAIN_REGISTERS(LOAD_WRITE_MEM_REGISTER1)
+// MAIN_REGISTERS(LOAD_WRITE_MEM_REGISTER1)
 
-static group_register_instructions_s write_register_mem_instruction[] = {
-  MAIN_REGISTERS(LOAD_WRITE_MEM_REGISTER2)
-};
+// static group_register_instructions_s write_register_mem_instruction[] = {
+//   MAIN_REGISTERS(LOAD_WRITE_MEM_REGISTER2)
+// };
 
-#define LOAD_READ_MEM_REGISTER1(CNAME, RNAME, OFFSET) \
-  ASM_BLOCK(write_mem_to_reg_ ## CNAME)
+// #define LOAD_READ_MEM_REGISTER1(CNAME, RNAME, OFFSET) \
+//   ASM_BLOCK(write_mem_to_reg_ ## CNAME)
 
-#define LOAD_READ_MEM_REGISTER2(CNAME, RNAME, OFFSET) \
-  { CNAME, cb_asm_write_mem_to_reg_ ## CNAME } ,
+// #define LOAD_READ_MEM_REGISTER2(CNAME, RNAME, OFFSET) \
+//   { CNAME, cb_asm_write_mem_to_reg_ ## CNAME } ,
 
-MAIN_REGISTERS(LOAD_READ_MEM_REGISTER1)
+// MAIN_REGISTERS(LOAD_READ_MEM_REGISTER1)
 
-static group_register_instructions_s read_mem_register_instruction[] = {
-  MAIN_REGISTERS(LOAD_READ_MEM_REGISTER2)
-};
+// static group_register_instructions_s read_mem_register_instruction[] = {
+//   MAIN_REGISTERS(LOAD_READ_MEM_REGISTER2)
+// };
 
 ASM_BLOCK(pop_stack);
 ASM_BLOCK(push_stack);
@@ -620,9 +622,14 @@ void Tracer::evaluate_instruction() {
       int ri = ud_register_to_sys(opr->base);
       assert(ri != -1);
       register_t rv = ((register_t*)regs_struct)[ri];
-      assert(ri < sizeof(test_register_instructions) / sizeof(group_register_instructions_s));
-      auto written = buffer->writeToEnd(test_register_instructions[ri].instruction);
-      written.replace_stump<uint64_t>(0xfafafafafafafafa, rv);
+      // assert(ri < sizeof(test_register_instructions) / sizeof(group_register_instructions_s));
+      // auto written = buffer->writeToEnd(test_register_instructions[ri].instruction);
+      // written.replace_stump<uint64_t>(0xfafafafafafafafa, rv);
+
+      SimpleCompiler compiler(buffer.get());
+      compiler.TestRegister(ri, rv);
+      auto written = compiler.finalize();
+
       set_pc(rv);
     }
     else {
@@ -727,10 +734,12 @@ void Tracer::replace_rip_instruction() {
       assert(val.is_ptr);
       assert(opr1->type == UD_OP_REG);
       int dest = ud_register_to_sys(opr1->base);
-      assert(dest < sizeof(set_register_instructions) / sizeof(group_register_instructions_s));
+      // assert(dest < sizeof(set_register_instructions) / sizeof(group_register_instructions_s));
 
-      auto written = buffer->writeToEnd(set_register_instructions[dest].instruction);
-      written.replace_stump<uint64_t>(0xfafafafafafafafa, val.address);
+      // auto written = buffer->writeToEnd(set_register_instructions[dest].instruction);
+      // written.replace_stump<uint64_t>(0xfafafafafafafafa, val.address);
+      SimpleCompiler compiler(buffer.get());
+      compiler.SetRegister(dest, val.address);
       return;
     }
     assert(0);
@@ -741,15 +750,15 @@ void Tracer::replace_rip_instruction() {
     const ud_operand_t *opr2 = ud_insn_opr(&disassm, 1); // source address
     assert(opr1 != NULL && opr2 != NULL);
     if(opr2->base == UD_R_RIP && opr2->index == UD_NONE) {
-      // then we are just reading some offset from this address
+      // // then we are just reading some offset from this address
       opr_value val = get_opr_value(opr2);
       assert(val.is_ptr);
       assert(opr1->type == UD_OP_REG);
       int dest = ud_register_to_sys(opr1->base);
-      assert(dest != -1 && dest < NUMBER_MAIN_REGISTERS);
-      auto written = buffer->writeToEnd(read_mem_register_instruction[dest].instruction);
-      written.replace_stump<uint64_t>(0xfafafafafafafafa, val.address);
-      return;
+
+      SimpleCompiler compiler(buffer.get());
+      compiler.MemToRegister(val.address, dest);
+
     }
     assert(0);
   }

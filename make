@@ -21,6 +21,7 @@ CXX_FLAGS = (
     '-ggdb '
     '-O0 '
     '-I ./deps/udis86 '
+    '-I ./deps/asmjit/src '
 )
 CXX_FLAGS_UNIT = (
     '-I ./deps/catch/ '
@@ -36,6 +37,7 @@ LD_FLAGS = ''
 CXX='g++'
 CC='gcc'
 LD='g++'
+RELEASE = False
 
 def build():
     deps()
@@ -43,11 +45,13 @@ def build():
     link()
 
 def release():
-    global CXX_FLAGS, LD_FLAGS
+    global CXX_FLAGS, LD_FLAGS, RELEASE
+    RELEASE = True
     CXX_FLAGS = CXX_FLAGS.replace('-O0', '-O2')
     CXX_FLAGS = CXX_FLAGS.replace('-ggdb', '')
     CXX_FLAGS += ' -DNDEBUG -fdata-sections -ffunction-sections -flto '
-    LD_FLAGS += '-flto '
+    LD_FLAGS += '-flto ' #-Wl,--gc-sections -Wl,--print-gc-sections '
+    clean()
     build()
     Run('mkdir -p release')
     Run('cp build/libredmagic.so.1.0.0 release/')
@@ -58,6 +62,7 @@ def release():
 def clean():
     autoclean()
     Shell('cd deps/udis86 && make clean', shell=True)
+    Shell('rm -rf build/asmjit')
 
 def run():
     build()
@@ -75,7 +80,9 @@ def link():
     #     **dict(globals(), **locals())
     # ))
     udis_libs = ' '.join(glob.glob('deps/udis86/libudis86/.libs/*.o'))
-    Run('{LD} {LD_FLAGS} -shared -fPIC -Wl,-soname,libredmagic.so.1.0.0 -o build/libredmagic.so.1.0.0 {objs} {udis_libs} {LIBS}'.format(
+    # we are not using the compiler interface, just the assembler, would be nice if we could strip all the functions
+    asmjit_libs = ' '.join(filter(lambda x: 'compiler' not in x, glob.glob('build/asmjit/CMakeFiles/asmjit.dir/src/asmjit/*/*.o')))
+    Run('{LD} {LD_FLAGS} -shared -fPIC -Wl,-soname,libredmagic.so.1.0.0 -o build/libredmagic.so.1.0.0 {objs} {udis_libs} {asmjit_libs} {LIBS}'.format(
         **dict(globals(), **locals())
     ))
     after()
@@ -145,10 +152,16 @@ def unit():
 
 def deps():
     # udis86 version 1.7.2
-    if not os.path.isfile('deps/udis86/libudis86/.libs/libudis86.so') or not os.path.isfile('deps/udis86/libudis86/itab.h'):
-        Shell('cd deps/udis86 && ./autogen.sh && PYTHON=`which python2` ./configure && make', shell=True)
-    if not os.path.isfile('build'):
+    if not os.path.isdir('build'):
         Shell('mkdir -p build')
+    if not os.path.isfile('deps/udis86/libudis86/.libs/libudis86.so') or not os.path.isfile('deps/udis86/libudis86/itab.h'):
+          Shell('cd deps/udis86 && ./autogen.sh && PYTHON=`which python2` ./configure && make', shell=True)
+    if not os.path.isfile('build/asmjit/libasmjit.so'):
+        Shell('mkdir -p build/asmjit')
+        if RELEASE:
+            Shell('cd build/asmjit && cmake ../../deps/asmjit -DASMJIT_CFLAGS=\'-O2\' && make VERBOSE=1 && touch release', shell=True)
+        else:
+            Shell('cd build/asmjit && cmake ../../deps/asmjit -DASMJIT_CFLAGS=\'-ggdb\' && make VERBOSE=1 && touch debug', shell=True)
     after()
 
 

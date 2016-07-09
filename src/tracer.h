@@ -2,11 +2,12 @@
 #define REDMAGIC_TRACER_H_
 #include "jit_internal.h"
 
+#include "constants.h"
+
+
 namespace redmagic {
 
   struct jump_instruction_info;
-
-#define TRACE_STACK_OFFSET 728  /* hardcode offset from this base stack */
 
   class Tracer {
   public:
