@@ -8,6 +8,8 @@
 
 #include <dlfcn.h>
 
+#include "align_udis_asmjit.h"
+
 using namespace redmagic;
 using namespace std;
 
@@ -655,7 +657,7 @@ void Tracer::evaluate_instruction() {
           // this is what it looks like when there is some dynamic linked library and it is going to resolve its address
           // and the store it in the memory location that we have just read from
 
-          printf("=============TODO\n");
+          printf("=============TODO: jumping to the next line to reolve an address, don't inline\n");
         }
         set_pc(*(mem_loc_t*)v.address);
       } else {
@@ -794,7 +796,7 @@ void Tracer::replace_rip_instruction() {
   }
 
   case UD_Ipush: {
-    const ud_operand *opr1 = ud_insn_opr(&disassm, 0);
+    const ud_operand_t *opr1 = ud_insn_opr(&disassm, 0);
     opr_value val = get_opr_value(opr1);
     assert(val.is_ptr);
     SimpleCompiler compiler(buffer.get());
@@ -803,10 +805,40 @@ void Tracer::replace_rip_instruction() {
     return;
   }
 
+  // case UD_Ipush: asmjit has an issue with push
+  case UD_Iadd:
+  _auto_rewrite_register:
+    {
+      // automatically rewrite the registers that are being used
+      // and then use the compiler to generate the approperate bytes
+      AlignedInstructions ali(&disassm);
+      uint64_t used_registers = ali.registers_used();
+      assert((used_registers & (1 << RIP)) != 0);
+      used_registers &= ~(1 << RIP);
+
+      SimpleCompiler compiler(buffer.get());
+      compiler.add_used_registers(used_registers);
+      auto scr = compiler.get_scratch_register();
+      compiler.mov(scr, udis_loc); // load the current rip into the scratch register
+      ali.ReplaceReigster(RIP, get_sys_register_from_asm(scr));
+      ali.Emit(&compiler);
+
+      auto written = compiler.finalize();
+      cout << "test";
+
+      break;
+    }
+
+
   case UD_Ijmp: {
     assert(0);
   }
-  default:
+  default: {
+    AlignedInstructions ali(&disassm);
+
+
+
     assert(0);
+  }
   }
 }

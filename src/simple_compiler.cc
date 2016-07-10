@@ -34,7 +34,7 @@ void SimpleCompiler::restore_registers() {
   int indx = 0;
   while(restore) {
     if(restore & 0x1) {
-      mov(get_register_from_id(indx), x86::ptr(x86::rsp, -TRACE_STACK_OFFSET + indx * 8 + move_stack_by));
+      mov(get_asm_register_from_sys(indx), x86::ptr(x86::rsp, -TRACE_STACK_OFFSET + indx * 8 + move_stack_by));
     }
     restore >>= 1;
     indx++;
@@ -44,7 +44,7 @@ void SimpleCompiler::restore_registers() {
 
 void SimpleCompiler::protect_register(int id) {
   if((clobbered_registers & (1 << id)) == 0) {
-    mov(x86::ptr(x86::rsp, -TRACE_STACK_OFFSET + id * 8 + move_stack_by), get_register_from_id(id));
+    mov(x86::ptr(x86::rsp, -TRACE_STACK_OFFSET + id * 8 + move_stack_by), get_asm_register_from_sys(id));
     clobbered_registers |= 1 << id;
   }
 }
@@ -64,7 +64,7 @@ const asmjit::X86GpReg& SimpleCompiler::get_scratch_register() {
     if((regs_using & (1 << indx)) == 0) {
       protect_register(indx);
       regs_using |= 1 << indx;
-      return get_register_from_id(indx);
+      return get_asm_register_from_sys(indx);
     }
   }
   // did not find a register
@@ -72,9 +72,14 @@ const asmjit::X86GpReg& SimpleCompiler::get_scratch_register() {
 }
 
 const asmjit::X86GpReg& SimpleCompiler::get_register(int id) {
-  assert((clobbered_registers & 1 << id) == 0);
+  assert((clobbered_registers & (1 << id)) == 0);
   regs_using |= 1 << id;
-  return get_register_from_id(id);
+  return get_asm_register_from_sys(id);
+}
+
+void SimpleCompiler::add_used_registers(uint64_t regs) {
+  assert((clobbered_registers & regs) == 0);
+  regs_using |= regs;
 }
 
 void SimpleCompiler::set_label_address(const asmjit::Label &label, mem_loc_t addr) {
