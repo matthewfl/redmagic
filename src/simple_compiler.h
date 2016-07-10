@@ -41,6 +41,7 @@ namespace redmagic {
     void PushMemoryLocationValue(mem_loc_t where);
 
     void TestRegister(int reg, register_t val);
+    void TestMemoryLocation(mem_loc_t where, register_t val);
 
     mem_loc_t MakeResumeTraceBlock(mem_loc_t tracer_base_ptr, mem_loc_t resume_pc);
 

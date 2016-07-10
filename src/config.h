@@ -4,5 +4,6 @@
 // used for debugging
 //#define CONF_COMPILE_IN_PARENT
 
+#define CONF_NUMBER_OF_JUMPS_BEFORE_TRACE 10
 
 #endif // REDMAGIC_CONFIG_H_

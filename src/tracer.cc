@@ -46,21 +46,30 @@ extern "C" void red_begin_tracing(void *other_stack, void* __, Tracer* tracer) {
 }
 
 extern "C" void red_asm_start_tracing(void*, void*, void*, void*);
-extern "C" void red_asm_ret_only();
+extern "C" void red_asm_begin_block();
 
 extern "C" void _dl_runtime_resolve();
 extern "C" void _dl_fixup();
 
-void __attribute__ ((optimize("O2"))) Tracer::Start() {
+void* Tracer::Start(void *start_addr) {
 
-  set_pc((uint64_t)&red_asm_ret_only);
+  set_pc((mem_loc_t)start_addr);
+  //set_pc((uint64_t)&red_asm_ret_only);
 
-  red_asm_start_tracing(NULL, (void*)&red_begin_tracing, this, stack - sizeof(stack));
+  //red_asm_start_tracing(NULL, (void*)&red_begin_tracing, this, stack - sizeof(stack));
+
+  using namespace asmjit;
+  SimpleCompiler compiler(buffer.get());
+  compiler.mov(x86::rdx, imm_ptr(this));
+  compiler.jmp(imm_ptr(red_begin_tracing));
+  compiler.finalize();
+
+  return (void*)&red_begin_tracing;
 }
 
 // abort after some number of instructions to see if there is an error with the first n instructions
 // useful for bisecting which instruction is failing if there is an error
-#define ABORT_BEFORE 150
+//#define ABORT_BEFORE 150
 
 
 
@@ -703,8 +712,14 @@ void Tracer::evaluate_instruction() {
         }
       }
     } else {
-      assert(0);
       // vtable branching
+      opr_value ta = get_opr_value(opr1);
+      assert(ta.is_ptr);
+      register_t value = *ta.address_ptr;
+      SimpleCompiler compiler(buffer.get());
+      compiler.TestMemoryLocation(ta.address, value);
+      compiler.finalize();
+      set_pc(value);
     }
 
     if(!redmagic::manager->should_trace_method((void*)udis_loc)) {

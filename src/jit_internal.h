@@ -43,12 +43,12 @@ namespace redmagic {
   public:
     Manager();
 
-    void begin_trace(void *id);
-    void end_trace(void *id);
-    void jump_to_trace(void *id);
+    void* begin_trace(void *id, void *ret_addr);
+    void* end_trace(void *id);
+    void* jump_to_trace(void *id);
 
-    void backwards_branch(void*);
-    void fellthrough_branch(void*);
+    void* backwards_branch(void *id, void *ret_addr);
+    void* fellthrough_branch(void*);
 
     void ensure_not_traced();
 
@@ -56,8 +56,14 @@ namespace redmagic {
     bool should_trace_method(void *ptr);
 
   private:
-    std::map<void*, int> branch_count;
-    std::map<void*, Tracer*> trace;
+    struct branch_info {
+      int count = 0;
+      Tracer *tracer = nullptr;
+    };
+
+    std::map<void*, branch_info> branches;
+    // std::map<void*, int> branch_count;
+    // std::map<void*, Tracer*> trace;
     std::set<void*> no_trace_methods;
 
 

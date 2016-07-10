@@ -54,9 +54,15 @@ red_asm_start_tracing:
 red_asm_compile_buff_near:
   ret
 
-  .global red_asm_ret_only
-red_asm_ret_only:
+  .global red_asm_begin_block
+red_asm_begin_block:
+  // add back to the rsp since we started by subtracting it
+  add $8, %rsp
   ret
+
+
+
+
 
 
 // we don't need executable stack

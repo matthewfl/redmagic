@@ -17,7 +17,7 @@ namespace redmagic {
   public:
     Tracer(std::shared_ptr<CodeBuffer> buffer);
 
-    void Start();
+    void* Start(void *start_addr);
 
     inline mem_loc_t _get_udis_location() { return udis_loc++; }
 
@@ -52,7 +52,8 @@ namespace redmagic {
       ud_type type;
       bool is_ptr;
       union {
-        register_t address;
+        mem_loc_t address;
+        register_t *address_ptr;
         register_t value;
       };
     };

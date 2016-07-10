@@ -122,6 +122,20 @@ void SimpleCompiler::TestRegister(int reg, register_t val) {
   popf();
 }
 
+void SimpleCompiler::TestMemoryLocation(mem_loc_t where, register_t val) {
+  Label success = newLabel();
+  Label failure = newLabel();
+  auto scr = get_scratch_register();
+  mov(scr, imm_ptr(where));
+  pushf();
+  test(x86::word_ptr(scr), imm_u(val));
+  je(success);
+  popf();
+  jmp(failure); // TODO: bind this label
+  bind(success);
+  popf();
+}
+
 uint64_t* SimpleCompiler::MakeCounter() {
   uint64_t *cptr = (uint64_t*)(buffer->buffer + buffer->size - buffer->trampolines_size - sizeof(uint64_t));
   *cptr = 0;

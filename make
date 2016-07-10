@@ -14,14 +14,16 @@ UNIT_TARGET = 'build/unit_tests'
 
 GIT_VERSION = Shell('git describe --always --long --dirty --abbrev=12', silent=True).strip()
 
-CXX_FLAGS = (
+C_FLAGS = (
     '-fPIC '
-    '-std=c++14 '
     '-I ./deps/ '
     '-ggdb '
     '-O0 '
     '-I ./deps/udis86 '
     '-I ./deps/asmjit/src '
+)
+CXX_FLAGS = (
+    '-std=c++14 '
 )
 CXX_FLAGS_UNIT = (
     '-I ./deps/catch/ '
@@ -45,11 +47,11 @@ def build():
     link()
 
 def release():
-    global CXX_FLAGS, LD_FLAGS, RELEASE
+    global C_FLAGS, LD_FLAGS, RELEASE
     RELEASE = True
-    CXX_FLAGS = CXX_FLAGS.replace('-O0', '-O2')
-    CXX_FLAGS = CXX_FLAGS.replace('-ggdb', '')
-    CXX_FLAGS += ' -DNDEBUG -fdata-sections -ffunction-sections -flto '
+    C_FLAGS = C_FLAGS.replace('-O0', '-O2')
+    C_FLAGS = C_FLAGS.replace('-ggdb', '')
+    C_FLAGS += ' -DNDEBUG -fdata-sections -ffunction-sections -flto '
     LD_FLAGS += '-flto ' #-Wl,--gc-sections -Wl,--print-gc-sections '
     clean()
     build()
@@ -94,10 +96,17 @@ def link():
 def compile():
     for f in glob.glob('src/*.cc'):
         Run('{CXX} {} -c {} -o {}'.format(
-            CXX_FLAGS,
+            C_FLAGS + CXX_FLAGS,
             f,
             f.replace('src', 'build').replace('.cc', '.o'),
             CXX=CXX
+        ))
+    for f in glob.glob('src/*.c'):
+        Run('{CC} {} -c {} -o {}'.format(
+            C_FLAGS,
+            f,
+            f.replace('src', 'build').replace('.c', '.o'),
+            CC=CC,
         ))
     # Run('{CC} -c src/asm.s -o build/asm.o'.format(
     #     CC=CC
@@ -113,7 +122,7 @@ def compile():
             group='asm_snippet2-{}'.format(s),
             after='asm_snippet1-{}'.format(s)
         )
-        Run('{CC} -c build/{fname} -o build/{oname}'.format(
+        Run('{CC} -fPIC -c build/{fname} -o build/{oname}'.format(
             CC=CC,
             fname=s.replace('.S', '.s'),
             oname=s.replace('.S', '.o'),
