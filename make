@@ -159,9 +159,9 @@ def deps():
     if not os.path.isfile('build/asmjit/libasmjit.so'):
         Shell('mkdir -p build/asmjit')
         if RELEASE:
-            Shell('cd build/asmjit && cmake ../../deps/asmjit -DASMJIT_CFLAGS=\'-O2\' && make VERBOSE=1 && touch release', shell=True)
+            Shell('cd build/asmjit && cmake ../../deps/asmjit -DASMJIT_DISABLE_COMPILER=1 -DASMJIT_CFLAGS=\'-O2\' -DASMJIT_RELEASE=1 && make VERBOSE=1 && touch release', shell=True)
         else:
-            Shell('cd build/asmjit && cmake ../../deps/asmjit -DASMJIT_CFLAGS=\'-ggdb\' && make VERBOSE=1 && touch debug', shell=True)
+            Shell('cd build/asmjit && cmake ../../deps/asmjit -DASMJIT_DISABLE_COMPILER=1 -DASMJIT_CFLAGS=\'-ggdb\' -DASMJIT_DEBUG=1 && make VERBOSE=1 && touch debug', shell=True)
     after()
 
 

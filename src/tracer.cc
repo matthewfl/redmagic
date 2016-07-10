@@ -805,7 +805,7 @@ void Tracer::replace_rip_instruction() {
     return;
   }
 
-  // case UD_Ipush: asmjit has an issue with push
+    //case UD_Ipush: // have to do push independently since the stack is moving
   case UD_Iadd:
   _auto_rewrite_register:
     {

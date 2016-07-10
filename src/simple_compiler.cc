@@ -145,9 +145,9 @@ uint64_t* SimpleCompiler::MakeCounter() {
 void SimpleCompiler::PushMemoryLocationValue(mem_loc_t where) {
   auto scr = get_scratch_register();
   mov(scr, imm_u(where));
-  // TODO: bug in asmjit prevents push from working directly with pointers???
-  mov(scr, x86::ptr(scr));
-  push(scr);
+  // // TODO: bug in asmjit prevents push from working directly with pointers???
+  // mov(scr, x86::ptr(scr));
+  push(x86::word_ptr(scr));
   move_stack_by -= sizeof(register_t);
 }
 

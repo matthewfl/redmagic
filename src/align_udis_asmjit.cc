@@ -149,7 +149,7 @@ const asmjit::Operand AlignedInstructions::get_asm_op(unsigned int i) {
   case UD_OP_MEM: {
     assert(info->base_register != -1);
     if(info->index_register == -1) {
-      return x86::ptr(get_asm_register_from_sys(info->base_register), info->offset);
+      return x86::word_ptr(get_asm_register_from_sys(info->base_register), info->offset);
     }
     int scale = 0;
     switch(info->index_scale) {
@@ -160,7 +160,7 @@ const asmjit::Operand AlignedInstructions::get_asm_op(unsigned int i) {
     case 64: scale = 4; break;
     default: assert(0);
     }
-    return x86::ptr(get_asm_register_from_sys(info->base_register), get_asm_register_from_sys(info->index_register), scale, info->offset);
+    return x86::word_ptr(get_asm_register_from_sys(info->base_register), get_asm_register_from_sys(info->index_register), scale, info->offset);
   }
   default:
     assert(0);
