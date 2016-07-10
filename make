@@ -30,7 +30,7 @@ CXX_FLAGS_UNIT = (
 LIBS = (
     '-pthread '
     '-ldl '
-    '-Wl,-Bstatic -lboost_context -Wl,-Bdynamic '
+    #'-Wl,-Bstatic -lboost_context -Wl,-Bdynamic '
     # '-ljemalloc'
 )
 LD_FLAGS = ''

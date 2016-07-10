@@ -41,8 +41,8 @@ namespace {
   } _do_alignment_inst;
 }
 
-enum X86InstId AlignedInstructions::get_asm_mnem() {
-  return aligned_instructions[ud_mnem].asm_code;
+enum X86InstId AlignedInstructions::get_asm_mnem(enum ud_mnemonic_code mnem) {
+  return aligned_instructions[mnem].asm_code;
 }
 
 

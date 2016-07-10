@@ -34,7 +34,7 @@ red_asm_resume_eval_block:
 
   movq %rsi, %rsp
   m_pop_all_regs
-  jmpq *-448(%rsp)
+  jmpq *-TRACE_RESUME_ADDRESS_OFFSET(%rsp)
 
 
   .global red_asm_start_tracing

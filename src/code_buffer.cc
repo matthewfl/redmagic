@@ -2,7 +2,6 @@
 
 #include <sys/mman.h>
 
-#include <iostream>
 using namespace std;
 
 using namespace redmagic;
@@ -100,10 +99,13 @@ void CodeBuffer::print() {
   ud_set_syntax(&disassm, UD_SYN_INTEL);
   ud_set_pc(&disassm, (mem_loc_t)buffer);
 
+  int icount = 0;
+
   while(ud_disassemble(&disassm)) {
-    cout << "[0x" << std::hex << ud_insn_off(&disassm) << std::dec << "] " << ud_insn_asm(&disassm) << "\t" << ud_insn_hex(&disassm) <<  endl;
+    printf("%8i\t%-35s [%#016lx] %s\n", ++icount, ud_insn_asm(&disassm), ud_insn_off(&disassm), ud_insn_hex(&disassm));
+
     if(buff_location - buffer >= size)
       break;
   }
-  cout << flush;
+  fflush(stdout);
 }

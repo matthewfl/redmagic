@@ -7,7 +7,11 @@
 
 namespace redmagic {
 
-  struct jump_instruction_info;
+  struct jump_instruction_info {
+    bool is_jump = false;
+    bool is_local_jump = false;
+    int64_t local_jump_location = 0;
+  };
 
   class Tracer {
   public:
@@ -29,6 +33,9 @@ namespace redmagic {
 
     void continue_program(mem_loc_t);
     void write_interrupt_block();
+
+    // jump back to the normal execution of this program
+    void abort();
 
     inline register_t pop_stack() {
       register_t r = *((register_t*)((mem_loc_t)regs_struct->rsp + TRACE_STACK_OFFSET + move_stack_by));
@@ -75,8 +82,15 @@ namespace redmagic {
     ud_t disassm;
     uint64_t udis_loc;
 
-    boost::context::fcontext_t self_context;
-    boost::context::fcontext_t running_context;
+
+    // Run variables
+    mem_loc_t current_location;
+    mem_loc_t last_location;
+    mem_loc_t generated_location;
+    struct jump_instruction_info jmp_info;
+    bool rip_used = false;
+    uint64_t icount = 0;
+
 
 #ifndef NDEBUG
     unsigned long before_stack = 0xdeadbeef;
@@ -87,12 +101,6 @@ namespace redmagic {
 #endif
   };
 
-  struct jump_instruction_info {
-    bool is_jump = false;
-    bool is_local_jump = false;
-    int64_t local_jump_location = 0;
-
-  };
 
 }
 

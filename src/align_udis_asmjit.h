@@ -42,7 +42,8 @@ namespace redmagic {
     }
 
     inline enum ud_mnemonic_code get_ud_mnem() { return ud_mnem; }
-    enum asmjit::X86InstId get_asm_mnem();
+    inline enum asmjit::X86InstId get_asm_mnem() { return get_asm_mnem(ud_mnem); }
+    static enum asmjit::X86InstId get_asm_mnem(enum ud_mnemonic_code mnem);
 
     const asmjit::Operand get_asm_op(unsigned int i);
 

@@ -50,6 +50,7 @@ int main(int argc, char* argv[]) {
     switch(program[pc]) {
     case PRINT_NUM:
       cout << program[pc + 1] << endl;
+      //printf("%i\n", program[pc + 1]);
       pc += 2;
       break;
     case JUMP_BACK:

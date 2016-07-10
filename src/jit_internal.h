@@ -22,8 +22,8 @@
 
 #include <errno.h>
 
-#include <boost/context/all.hpp>
 #include <memory>
+#include <assert.h>
 
 
 #include <udis86.h>

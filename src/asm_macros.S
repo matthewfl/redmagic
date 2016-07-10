@@ -35,10 +35,14 @@
   movq %r14, 136(%rsp)
   mov %cs, 136(%rsp)
 
-  pushf
-  pop %r15
-  movq %r15, 144(%rsp)
   movq %rsp, 152(%rsp)
+
+  add $144, %rsp
+  pushf
+  sub $136, %rsp
+  // pop %r15
+  // movq %r15, 144(%rsp)
+
 
   movq %r14, 160(%rsp)
   mov %ss, 160(%rsp)
@@ -61,9 +65,14 @@
   .macro m_pop_all_regs
 
   // eflags
-  movq 144(%rsp), %rax
-  push %rax
+  //movq 144(%rsp), %rax
+  //push %rax
+  //popf
+
+  add $136, %rsp
   popf
+  sub $144, %rsp
+
 
   movq 0(%rsp),  %r15
   movq 8(%rsp),  %r14

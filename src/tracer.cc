@@ -3,7 +3,6 @@
 
 #include "simple_compiler.h"
 
-#include <iostream>
 #include <string.h>
 
 #include <dlfcn.h>
@@ -49,6 +48,9 @@ extern "C" void red_begin_tracing(void *other_stack, void* __, Tracer* tracer) {
 extern "C" void red_asm_start_tracing(void*, void*, void*, void*);
 extern "C" void red_asm_ret_only();
 
+extern "C" void _dl_runtime_resolve();
+extern "C" void _dl_fixup();
+
 void __attribute__ ((optimize("O2"))) Tracer::Start() {
 
   set_pc((uint64_t)&red_asm_ret_only);
@@ -56,29 +58,30 @@ void __attribute__ ((optimize("O2"))) Tracer::Start() {
   red_asm_start_tracing(NULL, (void*)&red_begin_tracing, this, stack - sizeof(stack));
 }
 
+// abort after some number of instructions to see if there is an error with the first n instructions
+// useful for bisecting which instruction is failing if there is an error
+#define ABORT_BEFORE 150
+
+
+
 
 void Tracer::Run(void *other_stack) {
   regs_struct = (struct user_regs_struct*)other_stack;
 
-  mem_loc_t current_location;
-  mem_loc_t last_location;
-  mem_loc_t generated_location;
-  struct jump_instruction_info jmp_info;
-  bool rip_used = false;
-  uint64_t icount = 0;
+  current_location = udis_loc;
+
   while(true) {
     assert(before_stack == 0xdeadbeef);
     assert(after_stack == 0xdeadbeef);
     generated_location = buffer->getRawBuffer() + buffer->getOffset();
-    last_location = current_location = udis_loc;
+    last_location = udis_loc;
+    assert(current_location == last_location);
   processes_instructions:
     while(ud_disassemble(&disassm)) {
 
       Dl_info dlinfo;
       dladdr((void*)ud_insn_off(&disassm), &dlinfo);
 
-
-      // cout << "[0x" << std::hex << ud_insn_off(&disassm) << std::dec << " " << dlinfo.dli_sname << "] " << ud_insn_asm(&disassm) << "\t" << ud_insn_hex(&disassm) <<  endl << flush;
       auto ins_loc = ud_insn_off(&disassm);
 
       printf("%8i\t%-35s [%#016lx %-40s] %s\n", ++icount, ud_insn_asm(&disassm), ins_loc, dlinfo.dli_sname, ud_insn_hex(&disassm));
@@ -99,11 +102,12 @@ void Tracer::Run(void *other_stack) {
         }
         //assert(opr->base != UD_R_RIP && opr->index != UD_R_RIP);
       }
+#ifdef ABORT_BEFORE
+      if(icount >= ABORT_BEFORE)
+        goto run_instructions;
+#endif
       last_location = udis_loc;
-      //CodeBuffer one_ins(ud_insn_off(&disassm), ud_insn_len(&disassm));
-      //buffer->writeToEnd(one_ins);
     }
-    cout << flush;
   run_instructions:
     if(current_location != last_location) {
       {
@@ -111,33 +115,31 @@ void Tracer::Run(void *other_stack) {
         buffer->writeToEnd(ins_set);
       }
 
+      current_location = last_location;
       write_interrupt_block();
       continue_program(generated_location);
     }
+#ifdef ABORT_BEFORE
+    if(icount >= ABORT_BEFORE)
+      abort();
+#endif
   rewrite_instructions:
     regs_struct->rip = udis_loc;
     if(rip_used) {
       generated_location = buffer->getRawBuffer() + buffer->getOffset();
       replace_rip_instruction();
       // we have to evaluate this instruction which has been written
+      current_location = udis_loc;
       write_interrupt_block();
       continue_program(generated_location);
     } else {
       // this is a jump instruction that we are evaluating and replacing
       evaluate_instruction();
+      current_location = udis_loc;
     }
     rip_used = false;
-
-
   }
 }
-
-
-// void Tracer::tracer_start_cb(intptr_t ptr) {
-//   Tracer *t = (Tracer*)ptr;
-//   t->Run();
-//   assert(0);
-// }
 
 
 extern "C" void* red_asm_resume_eval_block(void*, void*);
@@ -146,7 +148,7 @@ void Tracer::continue_program(mem_loc_t resume_loc) {
   assert(regs_struct->rsp == (register_t)regs_struct);
   regs_struct->rsp += move_stack_by;
   move_stack_by = 0;
-  *((register_t*)(regs_struct->rsp + TRACE_STACK_OFFSET - 448 /* hardcode offset to find jump to loc */)) = resume_loc;
+  *((register_t*)(regs_struct->rsp + TRACE_STACK_OFFSET - TRACE_RESUME_ADDRESS_OFFSET )) = resume_loc;
   regs_struct = (struct user_regs_struct*)red_asm_resume_eval_block(&resume_struct, regs_struct);
 
 }
@@ -452,7 +454,8 @@ struct jump_instruction_info Tracer::decode_instruction() {
   }
 
   case UD_Iinvalid: {
-    cerr << "no idea: " << ud_insn_hex(&disassm) << endl;
+    //cerr << "no idea: " << ud_insn_hex(&disassm) << endl;
+    fprintf(stderr, "no idea: %s\n", ud_insn_hex(&disassm));
     assert(0);
   }
 
@@ -658,6 +661,7 @@ void Tracer::evaluate_instruction() {
           // and the store it in the memory location that we have just read from
 
           printf("=============TODO: jumping to the next line to reolve an address, don't inline\n");
+          abort();
         }
         set_pc(*(mem_loc_t*)v.address);
       } else {
@@ -710,6 +714,7 @@ void Tracer::evaluate_instruction() {
       written.replace_stump<uint64_t>(0xfafafafafafafafa, udis_loc);
       set_pc(ret_addr);
 
+      current_location = udis_loc;
       write_interrupt_block();
       continue_program(buf_loc);
 
@@ -739,7 +744,8 @@ void Tracer::evaluate_instruction() {
   }
 
   case UD_Iinvalid: {
-    cerr << "no idea: " << ud_insn_hex(&disassm) << endl;
+    // cerr << "no idea: " << ud_insn_hex(&disassm) << endl;
+    fprintf(stderr, "no idea: %s\n", ud_insn_hex(&disassm));
     assert(0);
   }
 
@@ -797,6 +803,7 @@ void Tracer::replace_rip_instruction() {
 
   case UD_Ipush: {
     const ud_operand_t *opr1 = ud_insn_opr(&disassm, 0);
+    assert(opr1->index == UD_NONE);
     opr_value val = get_opr_value(opr1);
     assert(val.is_ptr);
     SimpleCompiler compiler(buffer.get());
@@ -824,7 +831,6 @@ void Tracer::replace_rip_instruction() {
       ali.Emit(&compiler);
 
       auto written = compiler.finalize();
-      cout << "test";
 
       break;
     }
@@ -841,4 +847,9 @@ void Tracer::replace_rip_instruction() {
     assert(0);
   }
   }
+}
+
+
+void Tracer::abort() {
+  continue_program(current_location);
 }
