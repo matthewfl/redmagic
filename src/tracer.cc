@@ -17,6 +17,14 @@ namespace redmagic {
 }
 
 
+extern "C" void red_asm_resume_tracer_block_start();
+extern "C" void red_asm_resume_tracer_block_end();
+
+namespace {
+  CodeBuffer cb_interrupt_block((mem_loc_t)&red_asm_resume_tracer_block_start, (size_t)((mem_loc_t)&red_asm_resume_tracer_block_end - (mem_loc_t)&red_asm_resume_tracer_block_start));
+}
+
+
 static int udis_input_hook (ud_t *ud) {
   Tracer *t = (Tracer*)ud_get_user_opaque_data(ud);
   mem_loc_t l = t->_get_udis_location();
@@ -33,10 +41,15 @@ Tracer::Tracer(shared_ptr<CodeBuffer> buffer) {
   ud_set_vendor(&disassm, UD_VENDOR_INTEL);
   ud_set_syntax(&disassm, UD_SYN_ATT);
 
+
+  auto written = buffer->writeToEnd(cb_interrupt_block);
+  written.replace_stump<uint64_t>(0xfafafafafafafafa, (uint64_t)&resume_struct);
+
+  interrupt_block_location = written.getRawBuffer();
 }
 
 
-extern "C" void red_begin_tracing(void *other_stack, void* __, Tracer* tracer) {
+void red_begin_tracing(void *other_stack, void* __, Tracer* tracer) {
 
   //tracer->regs_struct = other_stack;
   tracer->Run(other_stack);
@@ -60,11 +73,19 @@ void* Tracer::Start(void *start_addr) {
 
   using namespace asmjit;
   SimpleCompiler compiler(buffer.get());
-  compiler.mov(x86::rdx, imm_ptr(this));
-  compiler.jmp(imm_ptr(red_begin_tracing));
-  compiler.finalize();
+  //compiler.mov(x86::rdx, x86::rsp);
+  compiler.mov(x86::rdx, imm_ptr(this)); // argument 3
+  compiler.mov(x86::rsi, imm_ptr(&red_begin_tracing));
+  resume_struct.stack_pointer = (register_t)stack - sizeof(stack) + sizeof(mem_loc_t);
+  *(void**)(stack - sizeof(stack) + sizeof(mem_loc_t)) = (void*)&red_asm_begin_block;
+  //compiler.mov(x86::rsp, imm_ptr(stack - sizeof(stack)));
+  //compiler.push(imm_ptr(red_begin_tracing));
+  compiler.jmp(imm_u(interrupt_block_location));
+  auto written = compiler.finalize();
 
-  return (void*)&red_begin_tracing;
+
+  return (void*)written.getRawBuffer();
+  //return (void*)&red_begin_tracing;
 }
 
 // abort after some number of instructions to see if there is an error with the first n instructions
@@ -93,7 +114,8 @@ void Tracer::Run(void *other_stack) {
 
       auto ins_loc = ud_insn_off(&disassm);
 
-      printf("%8i\t%-35s [%#016lx %-40s] %s\n", ++icount, ud_insn_asm(&disassm), ins_loc, dlinfo.dli_sname, ud_insn_hex(&disassm));
+      fprintf(stderr, "%8i\t%-35s [%#016lx %-40s] %s\n", ++icount, ud_insn_asm(&disassm), ins_loc, dlinfo.dli_sname, ud_insn_hex(&disassm));
+      fflush(stderr);
 
       jmp_info = decode_instruction();
       if(jmp_info.is_jump)
@@ -162,92 +184,35 @@ void Tracer::continue_program(mem_loc_t resume_loc) {
 
 }
 
-extern "C" void red_asm_resume_tracer_block_start();
-extern "C" void red_asm_resume_tracer_block_end();
-
-namespace {
-  CodeBuffer cb_interrupt_block((mem_loc_t)&red_asm_resume_tracer_block_start, (size_t)((mem_loc_t)&red_asm_resume_tracer_block_end - (mem_loc_t)&red_asm_resume_tracer_block_start));
-}
 
 #define ASM_BLOCK(label)                                    \
   extern "C" void red_asm_ ## label ## _start();            \
   extern "C" void red_asm_ ## label ## _end();              \
   static CodeBuffer cb_asm_ ## label ((mem_loc_t)&red_asm_ ## label ## _start, (size_t)((mem_loc_t)&red_asm_ ## label ## _end - (mem_loc_t)&red_asm_ ## label ## _start));
 
-  // [all cap name, %reg name, reg struct offset]
-#define MAIN_REGISTERS(METHOD)  \
-  METHOD(R15, %r15, 0)        \
-  METHOD(R14, %r14, 8)        \
-  METHOD(R13, %r13, 16)       \
-  METHOD(R12, %r12, 24)       \
-  METHOD(RBP, %rbp, 32)       \
-  METHOD(RBX, %rbx, 40)       \
-  METHOD(R11, %r11, 48)       \
-  METHOD(R10, %r10, 56)       \
-  METHOD(R9,  %r9,  64)       \
-  METHOD(R8,  %r8,  72)       \
-  METHOD(RAX, %rax, 80)       \
-  METHOD(RCX, %rcx, 88)       \
-  METHOD(RDX, %rdx, 96)       \
-  METHOD(RSI, %rsi, 104)      \
-  METHOD(RDI, %rdi, 112)
+//   // [all cap name, %reg name, reg struct offset]
+// #define MAIN_REGISTERS(METHOD)  \
+//   METHOD(R15, %r15, 0)        \
+//   METHOD(R14, %r14, 8)        \
+//   METHOD(R13, %r13, 16)       \
+//   METHOD(R12, %r12, 24)       \
+//   METHOD(RBP, %rbp, 32)       \
+//   METHOD(RBX, %rbx, 40)       \
+//   METHOD(R11, %r11, 48)       \
+//   METHOD(R10, %r10, 56)       \
+//   METHOD(R9,  %r9,  64)       \
+//   METHOD(R8,  %r8,  72)       \
+//   METHOD(RAX, %rax, 80)       \
+//   METHOD(RCX, %rcx, 88)       \
+//   METHOD(RDX, %rdx, 96)       \
+//   METHOD(RSI, %rsi, 104)      \
+//   METHOD(RDI, %rdi, 112)
 
-#define NUMBER_MAIN_REGISTERS 15
+// #define NUMBER_MAIN_REGISTERS 15
 
-struct group_register_instructions_s {
-  int register_index;
-  CodeBuffer instruction;
-};
-
-// #define LOAD_SET_REGISTER1(CNAME, RNAME, OFFSET)  \
-//   ASM_BLOCK(set_reg_ ## CNAME)
-
-// #define LOAD_SET_REGISTER2(CNAME, RNAME, OFFSET)    \
-//   {                                                 \
-//     CNAME , /* ref sys/regs.h */                    \
-//       cb_asm_set_reg_ ## CNAME                     \
-//       } ,
-
-// MAIN_REGISTERS(LOAD_SET_REGISTER1)
-
-// static group_register_instructions_s set_register_instructions[] = {
-//   MAIN_REGISTERS(LOAD_SET_REGISTER2)
-// };
-
-// #define LOAD_TEST_REGISTER1(CNAME, RNAME, OFFSET) \
-//   ASM_BLOCK(test_reg_ ## CNAME)
-
-// #define LOAD_TEST_REGISTER2(CNAME, RNAME, OFFSET) \
-//   { CNAME, cb_asm_test_reg_ ## CNAME } ,
-
-// MAIN_REGISTERS(LOAD_TEST_REGISTER1)
-
-// static group_register_instructions_s test_register_instructions[] = {
-//   MAIN_REGISTERS(LOAD_TEST_REGISTER2)
-// };
-
-// #define LOAD_WRITE_MEM_REGISTER1(CNAME, RNAME, OFFSET) \
-//   ASM_BLOCK(write_reg_to_addr_ ## CNAME)
-
-// #define LOAD_WRITE_MEM_REGISTER2(CNAME, RNAME, OFFSET) \
-//   { CNAME, cb_asm_write_reg_to_addr_ ## CNAME } ,
-
-// MAIN_REGISTERS(LOAD_WRITE_MEM_REGISTER1)
-
-// static group_register_instructions_s write_register_mem_instruction[] = {
-//   MAIN_REGISTERS(LOAD_WRITE_MEM_REGISTER2)
-// };
-
-// #define LOAD_READ_MEM_REGISTER1(CNAME, RNAME, OFFSET) \
-//   ASM_BLOCK(write_mem_to_reg_ ## CNAME)
-
-// #define LOAD_READ_MEM_REGISTER2(CNAME, RNAME, OFFSET) \
-//   { CNAME, cb_asm_write_mem_to_reg_ ## CNAME } ,
-
-// MAIN_REGISTERS(LOAD_READ_MEM_REGISTER1)
-
-// static group_register_instructions_s read_mem_register_instruction[] = {
-//   MAIN_REGISTERS(LOAD_READ_MEM_REGISTER2)
+// struct group_register_instructions_s {
+//   int register_index;
+//   CodeBuffer instruction;
 // };
 
 ASM_BLOCK(pop_stack);
@@ -258,8 +223,12 @@ ASM_BLOCK(call_direct);
 void Tracer::write_interrupt_block() {
   // write a block that will return control back to this program
   auto offset = buffer->getOffset();
-  auto written = buffer->writeToEnd(cb_interrupt_block);
-  written.replace_stump<uint64_t>(0xfafafafafafafafa, (uint64_t)&resume_struct);
+  // auto written = buffer->writeToEnd(cb_interrupt_block);
+  // written.replace_stump<uint64_t>(0xfafafafafafafafa, (uint64_t)&resume_struct);
+  {
+    SimpleCompiler compiler(buffer.get());
+    compiler.jmp(asmjit::imm_u(interrupt_block_location));
+  }
   buffer->setOffset(offset);
 }
 
@@ -866,5 +835,6 @@ void Tracer::replace_rip_instruction() {
 
 
 void Tracer::abort() {
+  printf("\n--ABORT--\n");
   continue_program(current_location);
 }

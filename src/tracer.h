@@ -92,6 +92,8 @@ namespace redmagic {
     bool rip_used = false;
     uint64_t icount = 0;
 
+    mem_loc_t interrupt_block_location;
+
 
 #ifndef NDEBUG
     unsigned long before_stack = 0xdeadbeef;

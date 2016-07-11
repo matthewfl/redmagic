@@ -37,17 +37,14 @@ red_asm_resume_eval_block:
   jmpq *-TRACE_RESUME_ADDRESS_OFFSET(%rsp)
 
 
-  .global red_asm_start_tracing
+/*  .global red_asm_start_tracing
 red_asm_start_tracing:
   // [null (old stack pointer), method_to_call, tracer_this, new_stack]
   m_push_all_regs
   movq %rsp, %rdi
   movq %rcx, %rsp
   jmp *%rsi
-
-
-
-
+*/
 
 
   .global red_asm_compile_buff_near
@@ -57,8 +54,8 @@ red_asm_compile_buff_near:
   .global red_asm_begin_block
 red_asm_begin_block:
   // add back to the rsp since we started by subtracting it
-  add $8, %rsp
-  ret
+  movq %rax, %rdi
+  call *%rsi
 
 
 

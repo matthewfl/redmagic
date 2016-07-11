@@ -93,12 +93,12 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
   branch_info *info = &branches[id];
   if(is_traced) {
     if(id == trace_id) {
-      end_trace(id);
+      return end_trace(id);
     }
   } else {
     int cnt = info->count++;
     if(cnt > CONF_NUMBER_OF_JUMPS_BEFORE_TRACE) {
-      begin_trace(id, ret_addr);
+      return begin_trace(id, ret_addr);
     }
   }
   return NULL;
@@ -107,9 +107,10 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
 void* Manager::fellthrough_branch(void *id) {
   if(trace_id == id) {
     if(is_traced) {
-      end_trace(id);
+      return end_trace(id);
     }
   }
+  return NULL;
 }
 
 namespace {
