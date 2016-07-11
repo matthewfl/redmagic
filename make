@@ -35,7 +35,7 @@ LIBS = (
     #'-Wl,-Bstatic -lboost_context -Wl,-Bdynamic '
     # '-ljemalloc'
 )
-LD_FLAGS = ''
+LD_FLAGS = '-Wl,--wrap=malloc -Wl,--wrap=free -Wl,--wrap=realloc -Wl,--wrap=calloc '
 CXX='g++'
 CC='gcc'
 LD='g++'
@@ -84,11 +84,11 @@ def link():
     udis_libs = ' '.join(glob.glob('deps/udis86/libudis86/.libs/*.o'))
     # we are not using the compiler interface, just the assembler, would be nice if we could strip all the functions
     asmjit_libs = ' '.join(filter(lambda x: 'compiler' not in x, glob.glob('build/asmjit/CMakeFiles/asmjit.dir/src/asmjit/*/*.o')))
-    Run('{LD} {LD_FLAGS} -shared -fPIC -Wl,-soname,libredmagic.so.1.0.0 -o build/libredmagic.so.1.0.0 {objs} {udis_libs} {asmjit_libs} {LIBS}'.format(
+    Run('{LD} {LD_FLAGS} -shared -fPIC -Wl,-Bsymbolic -Wl,-soname,libredmagic.so.1.0.0 -o build/libredmagic.so.1.0.0 {objs} {udis_libs} {asmjit_libs} {LIBS}'.format(
         **dict(globals(), **locals())
     ))
     after()
-    Run('{LD} {LD_FLAGS} -o {TARGET} build/main.o build/libredmagic.so.1.0.0 -Wl,-rpath=$ORIGIN/build/'.format(
+    Run('{LD} -o {TARGET} build/main.o build/libredmagic.so.1.0.0 -Wl,-rpath=$ORIGIN/build/'.format(
         **dict(globals(), **locals())
     ))
     after()
@@ -167,10 +167,15 @@ def deps():
           Shell('cd deps/udis86 && ./autogen.sh && PYTHON=`which python2` ./configure && make', shell=True)
     if not os.path.isfile('build/asmjit/libasmjit.so'):
         Shell('mkdir -p build/asmjit')
+        asm_flags = ''  # -DASMJIT_ALLOC=test123
         if RELEASE:
-            Shell('cd build/asmjit && cmake ../../deps/asmjit -DASMJIT_DISABLE_COMPILER=1 -DASMJIT_CFLAGS=\'-O2\' -DASMJIT_RELEASE=1 && make VERBOSE=1 && touch release', shell=True)
+            Shell('cd build/asmjit && cmake ../../deps/asmjit -DASMJIT_DISABLE_COMPILER=1 -DASMJIT_CFLAGS=\'==REPLACE_ME==\' -DASMJIT_RELEASE=1', shell=True)
+            asm_flags += '\-O2'
         else:
-            Shell('cd build/asmjit && cmake ../../deps/asmjit -DASMJIT_DISABLE_COMPILER=1 -DASMJIT_CFLAGS=\'-ggdb\' -DASMJIT_DEBUG=1 && make VERBOSE=1 && touch debug', shell=True)
+            Shell('cd build/asmjit && cmake ../../deps/asmjit -DASMJIT_DISABLE_COMPILER=1 -DASMJIT_CFLAGS=\'==REPLACE_ME==\' -DASMJIT_DEBUG=1', shell=True)
+            asm_flags += '\-ggdb'
+        Shell('sed -i s/==REPLACE_ME==/{}/ build/asmjit/CMakeFiles/asmjit.dir/flags.make'.format(asm_flags), shell=True)
+        Shell('cd build/asmjit && make VERBOSE=1', shell=True)
     after()
 
 

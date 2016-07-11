@@ -90,10 +90,14 @@ namespace redmagic {
     mem_loc_t generated_location;
     struct jump_instruction_info jmp_info;
     bool rip_used = false;
-    uint64_t icount = 0;
+    int64_t icount = 0;
 
     mem_loc_t interrupt_block_location;
 
+    // in the case that we don't actually want to inline this method, then we need to be able to backout
+    int64_t last_call_instruction = -1;
+    size_t last_call_generated_op; // where we have the corresponding gened ops (eg push ret addr)
+    mem_loc_t last_call_ret_addr;
 
 #ifndef NDEBUG
     unsigned long before_stack = 0xdeadbeef;

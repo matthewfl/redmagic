@@ -22,3 +22,5 @@ USER_INTERFACE(force_jump_to_trace);
 USER_INTERFACE(backwards_branch);
 USER_INTERFACE(fellthrough_branch);
 USER_INTERFACE(ensure_not_traced);
+USER_INTERFACE(temp_disable);
+USER_INTERFACE(temp_enable);

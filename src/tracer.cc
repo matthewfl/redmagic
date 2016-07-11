@@ -90,7 +90,7 @@ void* Tracer::Start(void *start_addr) {
 
 // abort after some number of instructions to see if there is an error with the first n instructions
 // useful for bisecting which instruction is failing if there is an error
-//#define ABORT_BEFORE 150
+#define ABORT_BEFORE 150
 
 
 
@@ -590,12 +590,14 @@ void Tracer::evaluate_instruction() {
   }
   case UD_Ijmp: {
     const ud_operand_t *opr = ud_insn_opr(&disassm, 0);
+    mem_loc_t jump_dest = 0;
+
     if(opr->type == UD_OP_IMM || opr->type == UD_OP_JIMM) {
       if(opr->type == UD_OP_IMM) {
         switch(opr->size) {
         case 32:
-          set_pc(udis_loc & ~0xffffffff | opr->lval.udword);
-          break;
+          jump_dest = udis_loc & ~0xffffffff | opr->lval.udword;
+          goto process_jump_dest;
         default:
           assert(0);
         }
@@ -603,14 +605,14 @@ void Tracer::evaluate_instruction() {
         assert(opr->type == UD_OP_JIMM);
         switch(opr->size) {
         case 8:
-          set_pc(udis_loc + opr->lval.sbyte);
-          break;
+          jump_dest = udis_loc + opr->lval.sbyte;
+          goto process_jump_dest;
         case 16:
-          set_pc(udis_loc + opr->lval.sword);
-          break;
+          jump_dest = udis_loc + opr->lval.sword;
+          goto process_jump_dest;
         case 32:
-          set_pc(udis_loc + opr->lval.sdword);
-          break;
+          jump_dest = udis_loc + opr->lval.sdword;
+          goto process_jump_dest;
         default:
           assert(0);
         }
@@ -628,7 +630,7 @@ void Tracer::evaluate_instruction() {
       compiler.TestRegister(ri, rv);
       auto written = compiler.finalize();
 
-      set_pc(rv);
+      jump_dest = rv;
     } else if(opr->type == UD_OP_MEM) {
       if(opr->base == UD_R_RIP) {
         // then we are going to assume that this is a constant value since this is relative to the rip
@@ -641,7 +643,8 @@ void Tracer::evaluate_instruction() {
           printf("=============TODO: jumping to the next line to reolve an address, don't inline\n");
           abort();
         }
-        set_pc(*(mem_loc_t*)v.address);
+        jump_dest = t;
+        //set_pc(*(mem_loc_t*)v.address);
       } else {
         assert(0);
       }
@@ -649,6 +652,24 @@ void Tracer::evaluate_instruction() {
     else {
       assert(0);
     }
+
+    process_jump_dest:
+    assert(jump_dest != 0);
+    if(last_call_instruction + 1 == icount) {
+      // then the first operation in this method was a jump, which means that we were probably jumping through a redirect with the dynamic linker
+      if(!manager->should_trace_method((void*)jump_dest)) {
+        buffer->setOffset(last_call_generated_op);
+        pop_stack();
+        set_pc(last_call_ret_addr);
+        SimpleCompiler compiler(buffer.get());
+        compiler.call(asmjit::imm_ptr(jump_dest));
+        auto written = compiler.finalize();
+        write_interrupt_block();
+        continue_program(written.getRawBuffer());
+        return;
+      }
+    }
+    set_pc(jump_dest);
     return;
   }
   case UD_Icall: {
@@ -657,6 +678,8 @@ void Tracer::evaluate_instruction() {
     assert(opr2 == NULL); // not 100% sure what the second opr would be used for
 
     register_t ret_addr = ud_insn_off(&disassm) + ud_insn_len(&disassm);
+
+    last_call_instruction = icount;
 
     if(opr1->type == UD_OP_IMM || opr1->type == UD_OP_JIMM) {
       if(opr1->type == UD_OP_IMM) {
@@ -690,6 +713,9 @@ void Tracer::evaluate_instruction() {
       compiler.finalize();
       set_pc(value);
     }
+
+    last_call_generated_op = buffer->getOffset();
+    last_call_ret_addr = ret_addr;
 
     if(!redmagic::manager->should_trace_method((void*)udis_loc)) {
       // check if this is some method that we should avoid inlining

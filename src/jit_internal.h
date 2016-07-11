@@ -16,9 +16,9 @@
 
 #include <thread>
 #include <atomic>
-#include <map>
-#include <vector>
-#include <set>
+#include <unordered_map>
+//#include <vector>
+#include <unordered_set>
 
 #include <errno.h>
 
@@ -61,10 +61,10 @@ namespace redmagic {
       Tracer *tracer = nullptr;
     };
 
-    std::map<void*, branch_info> branches;
+    std::unordered_map<uint64_t, branch_info> branches;
     // std::map<void*, int> branch_count;
     // std::map<void*, Tracer*> trace;
-    std::set<void*> no_trace_methods;
+    std::unordered_set<uint64_t> no_trace_methods;
 
 
     friend class Tracer;
