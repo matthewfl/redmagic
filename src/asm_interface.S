@@ -53,7 +53,6 @@ red_asm_compile_buff_near:
 
   .global red_asm_begin_block
 red_asm_begin_block:
-  // add back to the rsp since we started by subtracting it
   movq %rax, %rdi
   call *%rsi
 

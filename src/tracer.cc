@@ -176,10 +176,10 @@ void Tracer::Run(void *other_stack) {
 extern "C" void* red_asm_resume_eval_block(void*, void*);
 
 void Tracer::continue_program(mem_loc_t resume_loc) {
-  assert(regs_struct->rsp == (register_t)regs_struct);
+  assert(regs_struct->rsp - TRACE_STACK_OFFSET == (register_t)regs_struct);
   regs_struct->rsp += move_stack_by;
   move_stack_by = 0;
-  *((register_t*)(regs_struct->rsp + TRACE_STACK_OFFSET - TRACE_RESUME_ADDRESS_OFFSET )) = resume_loc;
+  *((register_t*)(regs_struct->rsp - TRACE_RESUME_ADDRESS_OFFSET)) = resume_loc;
   regs_struct = (struct user_regs_struct*)red_asm_resume_eval_block(&resume_struct, regs_struct);
 
 }
@@ -466,7 +466,7 @@ struct conditional_jumps_opts {
 };
 
 enum eflags_bits {
-  eflag_cf = 0,
+  eflag_cf = 1,
   eflag_pf = 1 << 2,
   eflag_af = 1 << 4,
   eflag_zf = 1 << 6,

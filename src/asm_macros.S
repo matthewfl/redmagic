@@ -12,37 +12,46 @@
   .macro  m_push_all_regs
   // should match sys/regs.h, sys/user.h
   // 216 bytes for the struct, and then offset by 512 from the current stack
+  movq %r15, (-TRACE_STACK_OFFSET + 0)(%rsp)
+  movq %r14, (-TRACE_STACK_OFFSET + 8)(%rsp)
+  movq %r13, (-TRACE_STACK_OFFSET + 16)(%rsp)
+  movq %r12, (-TRACE_STACK_OFFSET + 24)(%rsp)
+  movq %rbp, (-TRACE_STACK_OFFSET + 32)(%rsp)
+  movq %rbx, (-TRACE_STACK_OFFSET + 40)(%rsp)
+  movq %r11, (-TRACE_STACK_OFFSET + 48)(%rsp)
+  movq %r10, (-TRACE_STACK_OFFSET + 56)(%rsp)
+  movq %r9,  (-TRACE_STACK_OFFSET + 64)(%rsp)
+  movq %r8,  (-TRACE_STACK_OFFSET + 72)(%rsp)
+  movq %rax, (-TRACE_STACK_OFFSET + 80)(%rsp)
+  movq %rcx, (-TRACE_STACK_OFFSET + 88)(%rsp)
+  movq %rdx, (-TRACE_STACK_OFFSET + 96)(%rsp)
+  movq %rsi, (-TRACE_STACK_OFFSET + 104)(%rsp)
+  movq %rdi, (-TRACE_STACK_OFFSET + 112)(%rsp)
+
+
+  // using add/sub before this point will cause the eflags to change
+  // which we don't want, so save what ever was on the stack in the first place
+  // push the eflags and then restore the stack to what it was before
+  popq %r15
+  pushf
+  popq %r14
+  push %r15
+  movq %r14, (-TRACE_STACK_OFFSET + 144)(%rsp)
+
+  // now that the eflags are saved, we can use sub
   sub $TRACE_STACK_OFFSET, %rsp
 
-  movq %r15, 0(%rsp)
-  movq %r14, 8(%rsp)
-  movq %r13, 16(%rsp)
-  movq %r12, 24(%rsp)
-  movq %rbp, 32(%rsp)
-  movq %rbx, 40(%rsp)
-  movq %r11, 48(%rsp)
-  movq %r10, 56(%rsp)
-  movq %r9,  64(%rsp)
-  movq %r8,  72(%rsp)
-  movq %rax, 80(%rsp)
-  movq %rcx, 88(%rsp)
-  movq %rdx, 96(%rsp)
-  movq %rsi, 104(%rsp)
-  movq %rdi, 112(%rsp)
   // orig rax 120
   // rip 128
   xor %r14, %r14
   movq %r14, 136(%rsp)
   mov %cs, 136(%rsp)
 
-  movq %rsp, 152(%rsp)
-
-  add $144, %rsp
-  pushf
-  sub $136, %rsp
-  // pop %r15
-  // movq %r15, 144(%rsp)
-
+  mov %rsp, %r15
+  add $TRACE_STACK_OFFSET, %r15
+  // make the stored value of rsp contain where the stack actually ends
+  // this makes the restore at the end easier to write
+  movq %r15, 152(%rsp)
 
   movq %r14, 160(%rsp)
   mov %ss, 160(%rsp)
@@ -65,14 +74,13 @@
   .macro m_pop_all_regs
 
   // eflags
-  //movq 144(%rsp), %rax
-  //push %rax
-  //popf
-
-  add $136, %rsp
+  movq 144(%rsp), %r14
+  popq %r15
+  pushq %r14
   popf
-  sub $144, %rsp
+  pushq %r15
 
+  // can not use add/sub past this point due to the eflags being set
 
   movq 0(%rsp),  %r15
   movq 8(%rsp),  %r14
@@ -107,8 +115,9 @@
   //mov 200(%rsp), %fs
   //mov 208(%rsp), %gs
 
+  // the correct address is already computed in here
+  // so we don't need to adjust it any more
   movq 152(%rsp), %rsp
-  add $TRACE_STACK_OFFSET, %rsp
 
   .endm
 

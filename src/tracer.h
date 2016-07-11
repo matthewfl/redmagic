@@ -38,14 +38,14 @@ namespace redmagic {
     void abort();
 
     inline register_t pop_stack() {
-      register_t r = *((register_t*)((mem_loc_t)regs_struct->rsp + TRACE_STACK_OFFSET + move_stack_by));
+      register_t r = *((register_t*)((mem_loc_t)regs_struct->rsp + move_stack_by));
       move_stack_by += sizeof(register_t);
       return r;
     }
 
     inline void push_stack(register_t v) {
       move_stack_by -= sizeof(register_t);
-      *((register_t*)((mem_loc_t)regs_struct->rsp + TRACE_STACK_OFFSET + move_stack_by)) = v;
+      *((register_t*)((mem_loc_t)regs_struct->rsp + move_stack_by)) = v;
     }
 
     struct opr_value {
