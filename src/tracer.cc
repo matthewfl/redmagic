@@ -5,7 +5,7 @@
 
 #include <string.h>
 
-#include <dlfcn.h>
+// #include <dlfcn.h>
 
 #include "align_udis_asmjit.h"
 
@@ -80,7 +80,10 @@ void* Tracer::Start(void *start_addr) {
   *(void**)(stack - sizeof(stack) + sizeof(mem_loc_t)) = (void*)&red_asm_begin_block;
   //compiler.mov(x86::rsp, imm_ptr(stack - sizeof(stack)));
   //compiler.push(imm_ptr(red_begin_tracing));
+
   compiler.jmp(imm_u(interrupt_block_location));
+  //compiler.jmp(imm_ptr(start_addr));
+
   auto written = compiler.finalize();
 
 
@@ -90,7 +93,9 @@ void* Tracer::Start(void *start_addr) {
 
 // abort after some number of instructions to see if there is an error with the first n instructions
 // useful for bisecting which instruction is failing if there is an error
-#define ABORT_BEFORE 110
+#define ABORT_BEFORE 16
+// 15 works, 16 breaks with `mov (%rdx, %rax) %eax`
+// 21 was breaking almost instantly after `jmp *%rax`
 
 
 
@@ -106,16 +111,22 @@ void Tracer::Run(void *other_stack) {
     generated_location = buffer->getRawBuffer() + buffer->getOffset();
     last_location = udis_loc;
     assert(current_location == last_location);
+
   processes_instructions:
     while(ud_disassemble(&disassm)) {
 
-      Dl_info dlinfo;
-      dladdr((void*)ud_insn_off(&disassm), &dlinfo);
+      // some bug? cause crashes when decoding address
+      // Dl_info dlinfo;
+      // dladdr((void*)ud_insn_off(&disassm), &dlinfo);
 
       auto ins_loc = ud_insn_off(&disassm);
 
-      fprintf(stderr, "%8i\t%-35s [%#016lx %-40s] %s\n", ++icount, ud_insn_asm(&disassm), ins_loc, dlinfo.dli_sname, ud_insn_hex(&disassm));
-      fflush(stderr);
+#ifdef CONF_VERBOSE
+      red_printf("[%8i %#016lx] \t%-35s %s\n", ++icount, ins_loc, ud_insn_asm(&disassm), ud_insn_hex(&disassm));
+#endif
+
+      //fprintf(stderr, );
+      //fflush(stderr);
 
       jmp_info = decode_instruction();
       if(jmp_info.is_jump)
@@ -387,6 +398,9 @@ struct jump_instruction_info Tracer::decode_instruction() {
     case 16:
       ret.local_jump_location = opr->lval.sword;
       break;
+    case 32:
+      ret.local_jump_location = opr->lval.sdword;
+      break;
     default:
       assert(0);
     }
@@ -433,7 +447,7 @@ struct jump_instruction_info Tracer::decode_instruction() {
 
   case UD_Iinvalid: {
     //cerr << "no idea: " << ud_insn_hex(&disassm) << endl;
-    fprintf(stderr, "no idea: %s\n", ud_insn_hex(&disassm));
+    red_printf("no idea: %s\n", ud_insn_hex(&disassm));
     assert(0);
   }
 
@@ -640,7 +654,7 @@ void Tracer::evaluate_instruction() {
           // this is what it looks like when there is some dynamic linked library and it is going to resolve its address
           // and the store it in the memory location that we have just read from
 
-          printf("=============TODO: jumping to the next line to reolve an address, don't inline\n");
+          red_printf("=============TODO: jumping to the next line to reolve an address, don't inline\n");
           abort();
         }
         jump_dest = t;
@@ -755,7 +769,7 @@ void Tracer::evaluate_instruction() {
 
   case UD_Iinvalid: {
     // cerr << "no idea: " << ud_insn_hex(&disassm) << endl;
-    fprintf(stderr, "no idea: %s\n", ud_insn_hex(&disassm));
+    red_printf("no idea: %s\n", ud_insn_hex(&disassm));
     assert(0);
   }
 
@@ -861,6 +875,6 @@ void Tracer::replace_rip_instruction() {
 
 
 void Tracer::abort() {
-  printf("\n--ABORT--\n");
+  red_printf("\n--ABORT--\n");
   continue_program(current_location);
 }

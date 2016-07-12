@@ -26,6 +26,9 @@
 #include <assert.h>
 
 
+#include <unistd.h>
+
+
 #include <udis86.h>
 
 namespace redmagic {
@@ -75,6 +78,8 @@ namespace redmagic {
     CodeBuffer(size_t size);
     CodeBuffer(mem_loc_t start, size_t size);
     CodeBuffer();
+
+    CodeBuffer(CodeBuffer &&x);
 
     ~CodeBuffer();
 
@@ -352,6 +357,14 @@ namespace redmagic {
     }
   }
 
+  template<typename ...T>
+  inline void red_printf(const T &... args) {
+    // we have to avoid calls that could possibly use malloc or other systems which are maintaining some internal state
+    // so this is using a existing fixed size buffer and syscalls directly to avoid potential buffering/shared state outside of redmagic
+    char buffer[200];
+    int b = snprintf(buffer, sizeof(buffer), args...);
+    ::write(2, buffer, b);
+  }
 
 
 }

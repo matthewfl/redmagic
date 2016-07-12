@@ -6,4 +6,6 @@
 
 #define CONF_NUMBER_OF_JUMPS_BEFORE_TRACE 10
 
+#define CONF_VERBOSE
+
 #endif // REDMAGIC_CONFIG_H_

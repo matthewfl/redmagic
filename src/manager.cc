@@ -55,12 +55,15 @@ extern "C" void* red_user_temp_enable(void *_, void *ret_addr) {
   return NULL;
 }
 
+extern "C" void *__real_malloc(size_t);
+
 extern "C" void redmagic_start() {
   if(manager != nullptr) {
     perror("redmagic_start called twice");
     ::exit(1);
   }
-  redmagic::manager = new Manager();
+  void *p = __real_malloc(sizeof(Manager));
+  redmagic::manager = new(p) Manager();
 }
 
 static const char *avoid_inlining_methods[] = {
@@ -100,6 +103,7 @@ Manager::Manager() {
 
 void* Manager::begin_trace(void *id, void *ret_addr) {
 
+  void *ret;
   Tracer *l;
   {
     assert(tracer == nullptr);
@@ -107,11 +111,11 @@ void* Manager::begin_trace(void *id, void *ret_addr) {
     l = tracer = new Tracer(buff);
     branches[(uint64_t)id].tracer = l;
     trace_id = id;
+    ret = l->Start(ret_addr);
     is_traced = true;
   }
 
-  return l->Start(ret_addr);
-
+  return ret;
 }
 
 void* Manager::end_trace(void *id) {
@@ -131,12 +135,12 @@ void* Manager::jump_to_trace(void *id) {
 }
 
 void* Manager::backwards_branch(void *id, void *ret_addr) {
-  branch_info *info = &branches[(uint64_t)id];
   if(is_traced) {
     if(id == trace_id) {
       return end_trace(id);
     }
   } else {
+    branch_info *info = &branches[(uint64_t)id];
     int cnt = info->count++;
     if(cnt > CONF_NUMBER_OF_JUMPS_BEFORE_TRACE) {
       return begin_trace(id, ret_addr);
@@ -170,14 +174,15 @@ bool Manager::should_trace_method(void *id) {
   if(no_trace_methods.find((uint64_t)id) != no_trace_methods.end())
     return false;
 
-#ifndef NDEBUG
-  Dl_info dlinfo;
-  if(dladdr(id, &dlinfo) && dlinfo.dli_fbase == self_dlinfo.dli_fbase) {
-    //no_trace_methods.insert(id);
-    assert(0);
-    return false;
-  }
-#endif
+  // somehow eventually causes a crash
+// #ifndef NDEBUG
+//   Dl_info dlinfo;
+//   if(dladdr(id, &dlinfo) && dlinfo.dli_fbase == self_dlinfo.dli_fbase) {
+//     //no_trace_methods.insert(id);
+//     assert(0);
+//     return false;
+//   }
+// #endif
 
   return true;
 }

@@ -47,6 +47,18 @@ CodeBuffer::CodeBuffer():
   buffer_consumed(0)
 {}
 
+CodeBuffer::CodeBuffer(CodeBuffer &&x) {
+  buffer = x.buffer;
+  trampolines_size = x.trampolines_size;
+  size = x.size;
+  buffer_consumed = x.buffer_consumed;
+  owns_buffer = x.owns_buffer;
+  x.owns_buffer = false;
+  can_write_buffer = x.can_write_buffer;
+  external_trampolines = x.external_trampolines;
+  external_trampolines_size = x.external_trampolines_size;
+}
+
 CodeBuffer CodeBuffer::writeToEnd(CodeBuffer &other, long start, long end) {
   assert(external_trampolines == nullptr); // we can't relocate this without understanding the code
   mem_loc_t position = 0;
