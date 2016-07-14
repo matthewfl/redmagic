@@ -10,6 +10,9 @@
 
 // we can't direclty use allocators when we are tracing since it might screw with their internal states
 
+// use mmap and mprotect to wrap all alloc options
+//#define MPROTECTED_ALLOC
+
 #define NBUFFERS 6
 
 #define BUFFER_SIZES(X)                         \
@@ -35,8 +38,8 @@ extern "C" void *__real_malloc(size_t size);
 
 extern "C" void *__wrap_malloc(size_t size) {
 
+#ifdef MPROTECTED_ALLOC
   assert(size < 40*1024);
-
   {
     uint8_t *buffer = (uint8_t*)mmap(NULL, 40*1024 + 8*1024, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
     assert(buffer != MAP_FAILED);
@@ -48,8 +51,9 @@ extern "C" void *__wrap_malloc(size_t size) {
 
     return buffer + 4*1024;
   }
+#endif
 
-  return __real_malloc(16*1024);
+  // return __real_malloc(16*1024);
 
   if(size > largest_malloc)
     largest_malloc = size;
@@ -79,7 +83,9 @@ extern "C" void *__wrap_malloc(size_t size) {
 extern "C" void __real_free(void *ptr);
 
 extern "C" void __wrap_free(void *ptr) {
+#ifdef MPROTECTED_ALLOC
   return;
+#endif
 
 #define FREE_BUFFER(SIZE)                                               \
   if(ptr >= (void*)buffer_##SIZE && ptr <= (void*)((uint8_t*)buffer_##SIZE + sizeof(buffer_##SIZE))) { \
@@ -100,11 +106,11 @@ extern "C" void __wrap_free(void *ptr) {
 extern "C" void *__real_realloc(void *ptr, size_t size);
 
 extern "C" void *__wrap_realloc(void *ptr, size_t size) {
-
+#ifdef MPROTECTED_ALLOC
   if(size < 40*1024)
     return ptr;
-
   abort();
+#endif
 
   if(size > largest_malloc)
     largest_malloc = size;

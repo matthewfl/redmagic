@@ -1,6 +1,5 @@
 #include "jit_internal.h"
 #include "tracer.h"
-#include <sys/mman.h>
 
 #include <dlfcn.h>
 
@@ -63,12 +62,12 @@ extern "C" void redmagic_start() {
     perror("redmagic_start called twice");
     ::exit(1);
   }
-  void *p = __real_malloc(sizeof(Manager) + 1024*12);
-  p = (void*)((((mem_loc_t)p) + 8*1024) & ~(0xfff));
+  //void *p = __real_malloc(sizeof(Manager) + 1024*12);
+  //p = (void*)((((mem_loc_t)p) + 8*1024) & ~(0xfff));
 
-  redmagic::manager = new (p) Manager();
-  int r = mprotect(p, 4*1024, PROT_NONE);
-  assert(!r);
+  redmagic::manager = new Manager();
+  // int r = mprotect(p, 4*1024, PROT_NONE);
+  // assert(!r);
 }
 
 static const char *avoid_inlining_methods[] = {
@@ -115,14 +114,14 @@ void* Manager::begin_trace(void *id, void *ret_addr) {
     auto buff = make_shared<CodeBuffer>(4 * 1024 * 1024);
     l = tracer = new Tracer(buff);
 
-    int r = mprotect(this, 4*1024, PROT_READ | PROT_WRITE);
-    assert(!r);
+    // int r = mprotect(this, 4*1024, PROT_READ | PROT_WRITE);
+    // assert(!r);
 
     branches[(uint64_t)id].tracer = l;
 
 
-    r = mprotect(this, 4*1024, PROT_NONE);
-    assert(!r);
+    // r = mprotect(this, 4*1024, PROT_NONE);
+    // assert(!r);
 
     trace_id = id;
     ret = l->Start(ret_addr);
@@ -154,14 +153,14 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
       return end_trace(id);
     }
   } else {
-    int r = mprotect(this, 4*1024, PROT_READ | PROT_WRITE);
-    assert(!r);
+    // int r = mprotect(this, 4*1024, PROT_READ | PROT_WRITE);
+    // assert(!r);
 
     branch_info *info = &branches[(uint64_t)id];
     int cnt = info->count++;
 
-    r = mprotect(this, 4*1024, PROT_NONE);
-    assert(!r);
+    // r = mprotect(this, 4*1024, PROT_NONE);
+    // assert(!r);
 
 
     if(cnt > CONF_NUMBER_OF_JUMPS_BEFORE_TRACE) {
@@ -196,14 +195,14 @@ bool Manager::should_trace_method(void *id) {
 
   bool ret = true;
 
-  int r = mprotect(this, 4*1024, PROT_READ | PROT_WRITE);
-  assert(!r);
+  // int r = mprotect(this, 4*1024, PROT_READ | PROT_WRITE);
+  // assert(!r);
 
   if(no_trace_methods.find((uint64_t)id) != no_trace_methods.end())
     ret = false;
 
-  r = mprotect(this, 4*1024, PROT_NONE);
-  assert(!r);
+  // r = mprotect(this, 4*1024, PROT_NONE);
+  // assert(!r);
 
 
   // somehow eventually causes a crash

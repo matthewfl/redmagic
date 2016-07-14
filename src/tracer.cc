@@ -58,7 +58,8 @@ Tracer::Tracer(shared_ptr<CodeBuffer> buffer) {
   // assert(!r);
   // r = mprotect((void*)(stack_ptr + TRACE_STACK_SIZE + 4*1024), 4*1024, PROT_NONE);
   // assert(!r);
-  stack = (mem_loc_t)malloc(8*1024 + TRACE_STACK_SIZE);
+
+  // stack = (mem_loc_t)malloc(8*1024 + TRACE_STACK_SIZE);
 }
 
 Tracer::~Tracer() {
@@ -68,7 +69,8 @@ Tracer::~Tracer() {
   // r = mprotect((void*)(stack_ptr + TRACE_STACK_SIZE + 4*1024), 4*1024, PROT_READ | PROT_WRITE);
   // assert(!r);
   // free((void*)stack);
-  free((void*)stack);
+
+  // free((void*)stack);
 }
 
 
@@ -100,7 +102,8 @@ void* Tracer::Start(void *start_addr) {
   compiler.mov(x86::rdx, imm_ptr(this)); // argument 3
   compiler.mov(x86::rsi, imm_ptr(&red_begin_tracing));
 
-  mem_loc_t stack_ptr = ((stack + 8*1024) & ~(4*1024 - 1)) + TRACE_STACK_SIZE;
+  //mem_loc_t stack_ptr = ((stack + 8*1024) & ~(4*1024 - 1)) + TRACE_STACK_SIZE;
+  mem_loc_t stack_ptr = (((mem_loc_t)stack_) + sizeof(stack_)) & ~63;
 
   resume_struct.stack_pointer = (register_t)stack_ptr - sizeof(mem_loc_t);
   *(void**)(stack_ptr - sizeof(mem_loc_t)) = (void*)&red_asm_begin_block;
@@ -119,7 +122,7 @@ void* Tracer::Start(void *start_addr) {
 
 // abort after some number of instructions to see if there is an error with the first n instructions
 // useful for bisecting which instruction is failing if there is an error
-#define ABORT_BEFORE 1
+#define ABORT_BEFORE 10
 //56
 
 // break with 16 after 10 iterations
@@ -155,6 +158,8 @@ void Tracer::Run(void *other_stack) {
 #endif
 
   while(true) {
+    assert(before_stack == 0xdeadbeef);
+    assert(after_stack == 0xdeadbeef);
     generated_location = buffer->getRawBuffer() + buffer->getOffset();
     last_location = udis_loc;
     assert(current_location == last_location);

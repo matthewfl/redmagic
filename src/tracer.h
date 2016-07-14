@@ -103,6 +103,14 @@ namespace redmagic {
     mem_loc_t last_call_ret_addr;
 
     mem_loc_t stack;
+
+#ifndef NDEBUG
+    unsigned long before_stack = 0xdeadbeef;
+#endif
+    char stack_[TRACE_STACK_SIZE + 64];
+#ifndef NDEBUG
+    unsigned long after_stack = 0xdeadbeef;
+#endif
   };
 
 
