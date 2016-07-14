@@ -138,6 +138,7 @@ void* Manager::end_trace(void *id) {
   tracer = nullptr;
   trace_id = nullptr;
   is_traced = false;
+  assert(0);
   return NULL;
   //}
 }

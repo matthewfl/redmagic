@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <sys/mman.h>
 
-// #include <dlfcn.h>
+#include <dlfcn.h>
 
 #include "align_udis_asmjit.h"
 
@@ -122,7 +122,7 @@ void* Tracer::Start(void *start_addr) {
 
 // abort after some number of instructions to see if there is an error with the first n instructions
 // useful for bisecting which instruction is failing if there is an error
-#define ABORT_BEFORE 10
+//#define ABORT_BEFORE 250
 //56
 
 // break with 16 after 10 iterations
@@ -168,13 +168,13 @@ void Tracer::Run(void *other_stack) {
     while(ud_disassemble(&disassm)) {
 
       // some bug? cause crashes when decoding address
-      // Dl_info dlinfo;
-      // dladdr((void*)ud_insn_off(&disassm), &dlinfo);
-
-      auto ins_loc = ud_insn_off(&disassm);
+      Dl_info dlinfo;
+      dladdr((void*)ud_insn_off(&disassm), &dlinfo);
 
 #ifdef CONF_VERBOSE
-      red_printf("[%8i %#016lx] \t%-35s %s\n", ++icount, ins_loc, ud_insn_asm(&disassm), ud_insn_hex(&disassm));
+      auto ins_loc = ud_insn_off(&disassm);
+
+      red_printf("[%8i %#016lx] \t%-35s %-20s %s\n", ++icount, ins_loc, ud_insn_asm(&disassm), ud_insn_hex(&disassm), dlinfo.dli_sname);
 #endif
 
       //fprintf(stderr, );
@@ -558,7 +558,7 @@ struct conditional_jumps_opts jump_opts[] = {
   { UD_Ijns, { 0x0F, 0x89, 0xCD }, 3, UD_Ijs,  eflag_sf, 0, 0, 0, 0 },
   { UD_Ijp,  { 0x0F, 0x8A, 0xCD }, 3, UD_Ijnp, 0, eflag_pf, 0, 0, 0 },
   { UD_Ijnp, { 0x0F, 0x8B, 0xCD }, 3, UD_Ijp,  eflag_pf, 0, 0, 0, 0 },
-  { UD_Ijl,  { 0x0F, 0x8C, 0xCD }, 3, UD_Ijge, 0, 0, eflag_sf | eflag_of, 0 },
+  { UD_Ijl,  { 0x0F, 0x8C, 0xCD }, 3, UD_Ijge, 0, 0, 0, eflag_sf | eflag_of, 0 },
   { UD_Ijge, { 0x0F, 0x8D, 0xCD }, 3, UD_Ijl,  0, 0, eflag_sf | eflag_of, 0, 0 },
   { UD_Ijle, { 0x0F, 0x8E, 0xCD }, 3, UD_Ijg,  eflag_zf, 0, eflag_sf | eflag_of, 0, 1 },
   { UD_Ijg,  { 0x0F, 0x8F, 0xCD }, 3, UD_Ijle, eflag_zf, 0, eflag_sf | eflag_of, 0, 0 }
@@ -671,6 +671,7 @@ void Tracer::evaluate_instruction() {
         }
       } else {
         assert(opr->type == UD_OP_JIMM);
+
         switch(opr->size) {
         case 8:
           jump_dest = udis_loc + opr->lval.sbyte;
@@ -712,9 +713,14 @@ void Tracer::evaluate_instruction() {
           abort();
         }
         jump_dest = t;
-        //set_pc(*(mem_loc_t*)v.address);
       } else {
-        assert(0);
+        SimpleCompiler compiler(buffer.get());
+        assert(opr->index == UD_NONE);
+        int i = ud_register_to_sys(opr->base);
+        auto v = get_opr_value(opr);
+        register_t rv = ((register_t*)(regs_struct))[i];
+        compiler.TestRegister(i, rv);
+        jump_dest = *(mem_loc_t*)v.address;
       }
     }
     else {
@@ -890,8 +896,14 @@ void Tracer::replace_rip_instruction() {
     return;
   }
 
+  case UD_Ipop: {
+    // will change the stack pointer so have to handle specially
+    assert(0);
+  }
+
     //case UD_Ipush: // have to do push independently since the stack is moving
   case UD_Iadd:
+  case UD_Icmp:
   _auto_rewrite_register:
     {
       // automatically rewrite the registers that are being used
@@ -899,6 +911,7 @@ void Tracer::replace_rip_instruction() {
       AlignedInstructions ali(&disassm);
       uint64_t used_registers = ali.registers_used();
       assert((used_registers & (1 << RIP)) != 0);
+      assert((used_registers & (1 << RSP)) == 0);
       used_registers &= ~(1 << RIP);
 
       SimpleCompiler compiler(buffer.get());
