@@ -106,7 +106,7 @@
   // eflags above
 
   //movq %rsp, 152(%rsp)
-  mov 160(%rsp), %ss
+  //mov 160(%rsp), %ss
   // fsbase 168
   // gsbase 176
 

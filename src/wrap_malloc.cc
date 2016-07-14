@@ -3,6 +3,9 @@
 #include <stdint.h>
 #include <assert.h>
 
+#include <sys/mman.h>
+
+
 #include <new>
 
 // we can't direclty use allocators when we are tracing since it might screw with their internal states
@@ -12,7 +15,8 @@
 #define BUFFER_SIZES(X)                         \
   X(1024);                                      \
   X(4096);                                      \
-  X(8192);
+  X(8192);                                      \
+  X(16384);
 
 #define MALLOC_BUFFERS(SIZE)                                \
   __thread uint8_t allocated_ ## SIZE[NBUFFERS];            \
@@ -30,6 +34,23 @@ using namespace redmagic;
 extern "C" void *__real_malloc(size_t size);
 
 extern "C" void *__wrap_malloc(size_t size) {
+
+  assert(size < 40*1024);
+
+  {
+    uint8_t *buffer = (uint8_t*)mmap(NULL, 40*1024 + 8*1024, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    assert(buffer != MAP_FAILED);
+
+    int r = mprotect(buffer, 4*1024, PROT_NONE);
+    assert(!r);
+    r = mprotect(buffer + 20*1024, 4*1024, PROT_NONE);
+    assert(!r);
+
+    return buffer + 4*1024;
+  }
+
+  return __real_malloc(16*1024);
+
   if(size > largest_malloc)
     largest_malloc = size;
 
@@ -58,6 +79,8 @@ extern "C" void *__wrap_malloc(size_t size) {
 extern "C" void __real_free(void *ptr);
 
 extern "C" void __wrap_free(void *ptr) {
+  return;
+
 #define FREE_BUFFER(SIZE)                                               \
   if(ptr >= (void*)buffer_##SIZE && ptr <= (void*)((uint8_t*)buffer_##SIZE + sizeof(buffer_##SIZE))) { \
     int i = ((uint8_t*)ptr - (uint8_t*)&buffer_##SIZE) / SIZE;          \
@@ -77,6 +100,12 @@ extern "C" void __wrap_free(void *ptr) {
 extern "C" void *__real_realloc(void *ptr, size_t size);
 
 extern "C" void *__wrap_realloc(void *ptr, size_t size) {
+
+  if(size < 40*1024)
+    return ptr;
+
+  abort();
+
   if(size > largest_malloc)
     largest_malloc = size;
 #define REALLOC_BUFFER(SIZE)                                            \

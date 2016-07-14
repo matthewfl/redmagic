@@ -4,7 +4,6 @@
 
 #include "constants.h"
 
-
 namespace redmagic {
 
   struct jump_instruction_info {
@@ -16,6 +15,7 @@ namespace redmagic {
   class Tracer {
   public:
     Tracer(std::shared_ptr<CodeBuffer> buffer);
+    ~Tracer();
 
     void* Start(void *start_addr);
 
@@ -60,6 +60,9 @@ namespace redmagic {
 
     opr_value get_opr_value(const ud_operand_t *opr);
 
+#ifndef NDEBUG
+    bool debug_check_abort();
+#endif
 
     // static void tracer_start_cb(intptr_t ptr);
 
@@ -99,13 +102,7 @@ namespace redmagic {
     size_t last_call_generated_op; // where we have the corresponding gened ops (eg push ret addr)
     mem_loc_t last_call_ret_addr;
 
-#ifndef NDEBUG
-    unsigned long before_stack = 0xdeadbeef;
-#endif
-    char stack[1024 * 8];
-#ifndef NDEBUG
-    unsigned long after_stack = 0xdeadbeef;
-#endif
+    mem_loc_t stack;
   };
 
 

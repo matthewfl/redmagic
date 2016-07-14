@@ -14,7 +14,9 @@ CodeBuffer::CodeBuffer(size_t size):
   can_write_buffer(true),
   buffer_consumed(0)
 {
-  buffer = (uint8_t*)mmap((void*)&red_asm_compile_buff_near, size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANON, -1, 0);
+
+  buffer = (uint8_t*)mmap(NULL, //(void*)&red_asm_compile_buff_near,
+    size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANON, -1, 0);
 
   if(buffer == MAP_FAILED) {
     perror("failed to mmap buffer");

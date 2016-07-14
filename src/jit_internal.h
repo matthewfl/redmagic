@@ -20,14 +20,15 @@
 //#include <vector>
 #include <unordered_set>
 
-#include <errno.h>
+// #include <tbb/concurrent_unordered_set.h>
+// #include <tbb/concurrent_unordered_map.h>
 
+#include <errno.h>
 #include <memory>
 #include <assert.h>
 
-
+// for write syscall
 #include <unistd.h>
-
 
 #include <udis86.h>
 
@@ -64,11 +65,14 @@ namespace redmagic {
       Tracer *tracer = nullptr;
     };
 
-    std::unordered_map<uint64_t, branch_info> branches;
+
     // std::map<void*, int> branch_count;
     // std::map<void*, Tracer*> trace;
+    std::unordered_map<uint64_t, branch_info> branches;
     std::unordered_set<uint64_t> no_trace_methods;
 
+    // tbb::concurrent_unordered_map<uint64_t, branch_info> branches;
+    // tbb::concurrent_unordered_set<uint64_t> no_trace_methods;
 
     friend class Tracer;
   };

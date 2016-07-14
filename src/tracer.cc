@@ -4,10 +4,13 @@
 #include "simple_compiler.h"
 
 #include <string.h>
+#include <stdlib.h>
+#include <sys/mman.h>
 
 // #include <dlfcn.h>
 
 #include "align_udis_asmjit.h"
+
 
 using namespace redmagic;
 using namespace std;
@@ -23,7 +26,6 @@ extern "C" void red_asm_resume_tracer_block_end();
 namespace {
   CodeBuffer cb_interrupt_block((mem_loc_t)&red_asm_resume_tracer_block_start, (size_t)((mem_loc_t)&red_asm_resume_tracer_block_end - (mem_loc_t)&red_asm_resume_tracer_block_start));
 }
-
 
 static int udis_input_hook (ud_t *ud) {
   Tracer *t = (Tracer*)ud_get_user_opaque_data(ud);
@@ -46,6 +48,27 @@ Tracer::Tracer(shared_ptr<CodeBuffer> buffer) {
   written.replace_stump<uint64_t>(0xfafafafafafafafa, (uint64_t)&resume_struct);
 
   interrupt_block_location = written.getRawBuffer();
+
+
+  // mem_loc_t stack_ptr = (mem_loc_t)malloc(12*1024 + TRACE_STACK_SIZE);
+  // stack = stack_ptr;
+  // stack_ptr += 4*1024;
+  // stack_ptr &= ~(4*1024 - 1); // align to a page
+  // int r = mprotect((void*)stack_ptr, 4*1024, PROT_NONE);
+  // assert(!r);
+  // r = mprotect((void*)(stack_ptr + TRACE_STACK_SIZE + 4*1024), 4*1024, PROT_NONE);
+  // assert(!r);
+  stack = (mem_loc_t)malloc(8*1024 + TRACE_STACK_SIZE);
+}
+
+Tracer::~Tracer() {
+  // mem_loc_t stack_ptr = (stack + 4*1024) & ~(4*1024 - 1);
+  // int r = mprotect((void*)stack_ptr, 4*1024, PROT_READ | PROT_WRITE);
+  // assert(!r);
+  // r = mprotect((void*)(stack_ptr + TRACE_STACK_SIZE + 4*1024), 4*1024, PROT_READ | PROT_WRITE);
+  // assert(!r);
+  // free((void*)stack);
+  free((void*)stack);
 }
 
 
@@ -76,8 +99,11 @@ void* Tracer::Start(void *start_addr) {
   //compiler.mov(x86::rdx, x86::rsp);
   compiler.mov(x86::rdx, imm_ptr(this)); // argument 3
   compiler.mov(x86::rsi, imm_ptr(&red_begin_tracing));
-  resume_struct.stack_pointer = (register_t)stack - sizeof(stack) + sizeof(mem_loc_t);
-  *(void**)(stack - sizeof(stack) + sizeof(mem_loc_t)) = (void*)&red_asm_begin_block;
+
+  mem_loc_t stack_ptr = ((stack + 8*1024) & ~(4*1024 - 1)) + TRACE_STACK_SIZE;
+
+  resume_struct.stack_pointer = (register_t)stack_ptr - sizeof(mem_loc_t);
+  *(void**)(stack_ptr - sizeof(mem_loc_t)) = (void*)&red_asm_begin_block;
   //compiler.mov(x86::rsp, imm_ptr(stack - sizeof(stack)));
   //compiler.push(imm_ptr(red_begin_tracing));
 
@@ -93,21 +119,42 @@ void* Tracer::Start(void *start_addr) {
 
 // abort after some number of instructions to see if there is an error with the first n instructions
 // useful for bisecting which instruction is failing if there is an error
-#define ABORT_BEFORE 16
+#define ABORT_BEFORE 1
+//56
+
+// break with 16 after 10 iterations
+// if we should check what the loop number is first
+#define ABORT_ENTER_ITER 10
+
 // 15 works, 16 breaks with `mov (%rdx, %rax) %eax`
 // 21 was breaking almost instantly after `jmp *%rax`
 
+int loop_n = 0;
 
-
+#ifndef NDEBUG
+bool Tracer::debug_check_abort() {
+  // check specific conditions for performing an abort during debugging
+  // and if meet, return true
+#ifdef ABORT_BEFORE
+  if(icount >= ABORT_BEFORE)
+    return true;
+#endif
+  // if(loop_n == 10)
+  //   return true;
+  return false;
+}
+#endif
 
 void Tracer::Run(void *other_stack) {
   regs_struct = (struct user_regs_struct*)other_stack;
 
   current_location = udis_loc;
 
+#ifdef CONF_VERBOSE
+  red_printf("----->start %i\n", ++loop_n);
+#endif
+
   while(true) {
-    assert(before_stack == 0xdeadbeef);
-    assert(after_stack == 0xdeadbeef);
     generated_location = buffer->getRawBuffer() + buffer->getOffset();
     last_location = udis_loc;
     assert(current_location == last_location);
@@ -144,8 +191,8 @@ void Tracer::Run(void *other_stack) {
         }
         //assert(opr->base != UD_R_RIP && opr->index != UD_R_RIP);
       }
-#ifdef ABORT_BEFORE
-      if(icount >= ABORT_BEFORE)
+#ifndef NDEBUG
+      if(debug_check_abort())
         goto run_instructions;
 #endif
       last_location = udis_loc;
@@ -161,8 +208,8 @@ void Tracer::Run(void *other_stack) {
       write_interrupt_block();
       continue_program(generated_location);
     }
-#ifdef ABORT_BEFORE
-    if(icount >= ABORT_BEFORE)
+#ifndef NDEBUG
+    if(debug_check_abort())
       abort();
 #endif
   rewrite_instructions:
@@ -237,6 +284,8 @@ void Tracer::write_interrupt_block() {
   // auto written = buffer->writeToEnd(cb_interrupt_block);
   // written.replace_stump<uint64_t>(0xfafafafafafafafa, (uint64_t)&resume_struct);
   {
+    // TODO: DON'T USE SimpleCompiler here, it has a high overhead for starting and cleanup
+    // will be much faster to just hardcode a jmp with 32 bid address
     SimpleCompiler compiler(buffer.get());
     compiler.jmp(asmjit::imm_u(interrupt_block_location));
   }
