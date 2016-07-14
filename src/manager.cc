@@ -132,14 +132,19 @@ void* Manager::begin_trace(void *id, void *ret_addr) {
 }
 
 void* Manager::end_trace(void *id) {
-  assert(id == trace_id);
-  //if(tracer) {
+  Tracer *l;
+  void *ret;
+  {
+    assert(id == trace_id);
+    //if(tracer) {
     //trace[id] = tracer;
-  tracer = nullptr;
-  trace_id = nullptr;
-  is_traced = false;
-  assert(0);
-  return NULL;
+    l = tracer;
+    tracer = nullptr;
+    trace_id = nullptr;
+    is_traced = false;
+    ret = l->EndTraceLoop();
+  }
+  return ret;
   //}
 }
 

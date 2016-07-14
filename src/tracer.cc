@@ -111,10 +111,12 @@ void* Tracer::Start(void *start_addr) {
   //compiler.push(imm_ptr(red_begin_tracing));
 
   compiler.jmp(imm_u(interrupt_block_location));
+  compiler.mov(x86::r15, imm_u(0xdeadbeef));
   //compiler.jmp(imm_ptr(start_addr));
 
   auto written = compiler.finalize();
 
+  loop_start_location = buffer->getRawBuffer() + buffer->getOffset();
 
   return (void*)written.getRawBuffer();
   //return (void*)&red_begin_tracing;
@@ -127,7 +129,7 @@ void* Tracer::Start(void *start_addr) {
 
 // break with 16 after 10 iterations
 // if we should check what the loop number is first
-#define ABORT_ENTER_ITER 10
+//#define ABORT_ENTER_ITER 10
 
 // 15 works, 16 breaks with `mov (%rdx, %rax) %eax`
 // 21 was breaking almost instantly after `jmp *%rax`
@@ -233,6 +235,20 @@ void Tracer::Run(void *other_stack) {
     }
     rip_used = false;
   }
+}
+
+void* Tracer::EndTraceFallThrough() {
+
+}
+
+void* Tracer::EndTraceLoop() {
+  // assert that we recently performed a call
+  // this should be to ourselves to end the trace
+  assert(icount - last_call_instruction < 2);
+  buffer->setOffset(last_call_generated_op);
+  SimpleCompiler compiler(buffer.get());
+  compiler.jmp(asmjit::imm_ptr(loop_start_location));
+  return (void*)loop_start_location;
 }
 
 

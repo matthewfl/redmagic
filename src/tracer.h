@@ -22,6 +22,9 @@ namespace redmagic {
     inline mem_loc_t _get_udis_location() { return udis_loc++; }
 
     void Run(void *);
+
+    void* EndTraceFallThrough();
+    void* EndTraceLoop();
   private:
 
 
@@ -54,7 +57,7 @@ namespace redmagic {
       union {
         mem_loc_t address;
         register_t *address_ptr;
-        register_t value;
+         register_t value;
       };
     };
 
@@ -102,7 +105,9 @@ namespace redmagic {
     size_t last_call_generated_op; // where we have the corresponding gened ops (eg push ret addr)
     mem_loc_t last_call_ret_addr;
 
-    mem_loc_t stack;
+    mem_loc_t loop_start_location;
+
+    // mem_loc_t stack;
 
 #ifndef NDEBUG
     unsigned long before_stack = 0xdeadbeef;
