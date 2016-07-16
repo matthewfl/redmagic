@@ -139,7 +139,7 @@ void* Manager::end_trace(void *id) {
     //if(tracer) {
     //trace[id] = tracer;
     l = tracer;
-    tracer = nullptr;
+    //tracer = nullptr;
     trace_id = nullptr;
     is_traced = false;
     ret = l->EndTraceLoop();

@@ -57,6 +57,25 @@ red_asm_begin_block:
   call *%rsi
 
 
+// restart the trace on a bad branch inlined
+  .global red_asm_restart_trace
+
+red_asm_restart_trace:
+  // the target rip has been put into r15
+  m_push_all_regs
+  // move the info into argument registers
+  movq %r10, %rdi
+  movq %r9, %rsi
+  movq %rsp, %rdx
+
+  // restore the origional values of r14&15
+  movq 216(%rsp), %r10
+  movq 224(%rsp), %r9
+  movq %r10, 56(%rsp)
+  movq %r9, 64(%rsp)
+
+  call red_resume_trace@plt
+  jmp *%rax
 
 
 

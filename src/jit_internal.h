@@ -20,6 +20,8 @@
 //#include <vector>
 #include <unordered_set>
 
+#include <mutex>
+
 // #include <tbb/concurrent_unordered_set.h>
 // #include <tbb/concurrent_unordered_map.h>
 
@@ -88,10 +90,10 @@ namespace redmagic {
     ~CodeBuffer();
 
     //void *getBuffer() { return buffer; }
-    inline size_t getSize() { return size - trampolines_size + external_trampolines_size; }
-    inline size_t getFree() { return size - trampolines_size - buffer_consumed; }
+    const inline size_t getSize() { return size - trampolines_size + external_trampolines_size; }
+    const inline size_t getFree() { return size - trampolines_size - buffer_consumed; }
 
-    inline uint8_t* whereByte(mem_loc_t offset) {
+    inline uint8_t* whereByte(mem_loc_t offset) const {
       assert(offset < size - trampolines_size + external_trampolines_size);
       if(offset < size - trampolines_size) {
         return buffer + offset;
@@ -101,7 +103,7 @@ namespace redmagic {
       assert(0);
     }
 
-    inline uint8_t readByte(mem_loc_t offset) {
+    inline uint8_t readByte(mem_loc_t offset) const {
       return *whereByte(offset);
     }
     inline void writeByte(mem_loc_t offset, uint8_t val) {
@@ -112,12 +114,18 @@ namespace redmagic {
 
   public:
     // write another code buffer to the end of this one
-    CodeBuffer writeToEnd(CodeBuffer &other, long start=-1, long end=-1);
+    CodeBuffer writeToEnd(const CodeBuffer &other, long start=-1, long end=-1);
+
+    // write to the bottom, reverse order so used for small trampolines
+    CodeBuffer writeToBottom(const CodeBuffer &other, long start=-1, long end=-1);
+
     void print();
 
-    inline size_t getOffset() { return buffer_consumed; }
+    inline size_t getOffset() const { return buffer_consumed; }
     inline void setOffset(size_t o) { buffer_consumed = o; }
     inline mem_loc_t getRawBuffer() { return (mem_loc_t)buffer; }
+
+    inline void __set_can_write() { can_write_buffer = true; }
 
   public:
     template<typename SizeT> void replace_stump(SizeT from, SizeT to) {
@@ -143,6 +151,10 @@ namespace redmagic {
       }
       assert(did_replace == 1);
     }
+
+  public:
+    std::mutex generation_mutex;
+    // std::unique_lock<std::mutex> generation_lock = std::unique_lock<std::mutex>(_generation_mutex);
 
   private:
     uint8_t *buffer;

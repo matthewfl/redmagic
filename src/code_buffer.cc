@@ -15,7 +15,7 @@ CodeBuffer::CodeBuffer(size_t size):
   buffer_consumed(0)
 {
 
-  buffer = (uint8_t*)mmap(NULL, //(void*)&red_asm_compile_buff_near,
+  buffer = (uint8_t*)mmap((void*)&red_asm_compile_buff_near,
     size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANON, -1, 0);
 
   if(buffer == MAP_FAILED) {
@@ -61,8 +61,8 @@ CodeBuffer::CodeBuffer(CodeBuffer &&x) {
   external_trampolines_size = x.external_trampolines_size;
 }
 
-CodeBuffer CodeBuffer::writeToEnd(CodeBuffer &other, long start, long end) {
-  assert(external_trampolines == nullptr); // we can't relocate this without understanding the code
+CodeBuffer CodeBuffer::writeToEnd(const CodeBuffer &other, long start, long end) {
+  assert(other.external_trampolines == nullptr); // we can't relocate this without understanding the code
   mem_loc_t position = 0;
   if(start > 0)
     position = start;
@@ -80,17 +80,41 @@ CodeBuffer CodeBuffer::writeToEnd(CodeBuffer &other, long start, long end) {
   while(position < endl) {
     writeByte(buffer_consumed++, other.readByte(position++));
   }
-  // for(auto j : other.jumps) {
-  //   if(j.buffer_offset >= startl && j.buffer_offset < endl) {
-  //     struct rebind_jumps new_jmp = j;
-  //     new_jmp.buffer_offset = j.buffer_offset - startl + self_start;
-  //     jumps.push_back(new_jmp);
-  //   }
-  // }
 
   CodeBuffer ret((mem_loc_t)buffer + self_start, buffer_consumed - self_start);
   ret.can_write_buffer = true;
   return ret;
+}
+
+CodeBuffer CodeBuffer::writeToBottom(const CodeBuffer &other, long start, long end) {
+  assert(other.external_trampolines == nullptr); // we can't relocate this without understanding the code
+  assert(external_trampolines == nullptr || (external_trampolines >= buffer && external_trampolines <= buffer + size));
+  mem_loc_t position = 0;
+  if(start > 0)
+    position = start;
+  mem_loc_t startl = position;
+  mem_loc_t self_start = buffer_consumed;
+  assert(end < 0 || end < other.buffer_consumed);
+  mem_loc_t endl = end;
+  if(end < 0) {
+    endl = other.buffer_consumed;
+  }
+
+  assert(endl <= other.buffer_consumed);
+  assert(endl - position + buffer_consumed < size);
+
+  size_t gsize = startl - endl;
+  size_t target_position = size - trampolines_size - gsize;
+  trampolines_size += gsize;
+
+  while(position < endl) {
+    writeByte(target_position++, other.readByte(position++));
+  }
+
+  CodeBuffer ret((mem_loc_t)buffer + self_start, buffer_consumed - self_start);
+  ret.can_write_buffer = true;
+  return ret;
+
 }
 
 static int codebuff_input_hook(ud_t *ud) {

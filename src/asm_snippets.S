@@ -4,9 +4,13 @@
   .global red_asm_pop_stack_start
   .global red_asm_pop_stack_end
 red_asm_pop_stack_start:
+  // this will end up chainging the eflags register
+  // would be nice if there was a way to avoid doing that but still pop the stack
+  // this should happen around method call returns so the value of eflags shouldn't matter in most cases....
   add $8, %rsp
 red_asm_pop_stack_end:
 
+/*
   .global red_asm_push_stack_start
   .global red_asm_push_stack_end
 red_asm_push_stack_start:
@@ -21,6 +25,7 @@ red_asm_push_stack_start:
   .byte 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa
 2:
 red_asm_push_stack_end:
+  */
 
 
 
@@ -90,7 +95,7 @@ red_asm_call_multiway_call_offset:
 
 red_asm_call_multiway_end:
 
-
+/*
   .global red_asm_call_direct_start
   .global red_asm_call_direct_end
 red_asm_call_direct_start:
@@ -100,7 +105,7 @@ red_asm_call_direct_start:
   .byte 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa
 2:
 red_asm_call_direct_end:
-
+*/
   .global red_asm_count_start
   .global red_asm_count_end
   .global red_asm_count_offset

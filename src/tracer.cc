@@ -17,6 +17,7 @@ using namespace std;
 
 namespace redmagic {
   extern Manager *manager;
+  extern thread_local Tracer *tracer;
 }
 
 
@@ -48,7 +49,6 @@ Tracer::Tracer(shared_ptr<CodeBuffer> buffer) {
   written.replace_stump<uint64_t>(0xfafafafafafafafa, (uint64_t)&resume_struct);
 
   interrupt_block_location = written.getRawBuffer();
-
 
   // mem_loc_t stack_ptr = (mem_loc_t)malloc(12*1024 + TRACE_STACK_SIZE);
   // stack = stack_ptr;
@@ -83,13 +83,31 @@ void red_begin_tracing(void *other_stack, void* __, Tracer* tracer) {
   assert(0);
 }
 
+extern "C" void* red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_address, struct user_regs_struct *regs_stack_ptr) {
+
+  // the dummy address
+  assert(write_jump_address != 0xfafafafafafafafa);
+
+  CodeBuffer jbuf(write_jump_address, 15);
+  SimpleCompiler jcompiler(&jbuf);
+
+
+
+
+  assert(0);
+
+  return NULL;
+}
+
 extern "C" void red_asm_start_tracing(void*, void*, void*, void*);
 extern "C" void red_asm_begin_block();
 
-extern "C" void _dl_runtime_resolve();
-extern "C" void _dl_fixup();
+// extern "C" void _dl_runtime_resolve();
+// extern "C" void _dl_fixup();
 
 void* Tracer::Start(void *start_addr) {
+
+  //generation_lock.lock();
 
   set_pc((mem_loc_t)start_addr);
   //set_pc((uint64_t)&red_asm_ret_only);
@@ -165,15 +183,14 @@ void Tracer::Run(void *other_stack) {
     generated_location = buffer->getRawBuffer() + buffer->getOffset();
     last_location = udis_loc;
     assert(current_location == last_location);
+    //assert(generation_lock.owns_lock());
 
   processes_instructions:
     while(ud_disassemble(&disassm)) {
 
-      // some bug? cause crashes when decoding address
+#ifdef CONF_VERBOSE
       Dl_info dlinfo;
       dladdr((void*)ud_insn_off(&disassm), &dlinfo);
-
-#ifdef CONF_VERBOSE
       auto ins_loc = ud_insn_off(&disassm);
 
       red_printf("[%8i %#016lx] \t%-35s %-20s %s\n", ++icount, ins_loc, ud_insn_asm(&disassm), ud_insn_hex(&disassm), dlinfo.dli_sname);
@@ -295,8 +312,8 @@ void Tracer::continue_program(mem_loc_t resume_loc) {
 // };
 
 ASM_BLOCK(pop_stack);
-ASM_BLOCK(push_stack);
-ASM_BLOCK(call_direct);
+//ASM_BLOCK(push_stack);
+//ASM_BLOCK(call_direct);
 
 
 void Tracer::write_interrupt_block() {
@@ -533,8 +550,8 @@ struct jump_instruction_info Tracer::decode_instruction() {
 struct conditional_jumps_opts {
   enum ud_mnemonic_code code;
 
-  uint8_t true_encoding[4];
-  uint8_t true_encoding_len;
+  // uint8_t true_encoding[4];
+  // uint8_t true_encoding_len;
 
   enum ud_mnemonic_code false_inst;
 
@@ -561,23 +578,43 @@ enum eflags_bits {
   eflag_of = 1 << 11,
 };
 
+
+// the binary encodings of these instructions with 4 bytes for the jump address
+// { 0x0F, 0x80, 0xCD }, 3,
+// { 0x0F, 0x81, 0xCD }, 3,
+// { 0x0F, 0x82, 0xCD }, 3,
+// { 0x0F, 0x83, 0xCD }, 3,
+// { 0x0F, 0x84, 0xCD }, 3,
+// { 0x0F, 0x85, 0xCD }, 3,
+// { 0x0F, 0x86, 0xCD }, 3,
+// { 0x0F, 0x87, 0xCD }, 3,
+// { 0x0F, 0x88, 0xCD }, 3,
+// { 0x0F, 0x89, 0xCD }, 3,
+// { 0x0F, 0x8A, 0xCD }, 3,
+// { 0x0F, 0x8B, 0xCD }, 3,
+// { 0x0F, 0x8C, 0xCD }, 3,
+// { 0x0F, 0x8D, 0xCD }, 3,
+// { 0x0F, 0x8E, 0xCD }, 3,
+// { 0x0F, 0x8F, 0xCD }, 3,
+
+
 struct conditional_jumps_opts jump_opts[] = {
-  { UD_Ijo,  { 0x0F, 0x80, 0xCD }, 3, UD_Ijno, 0, eflag_of, 0, 0, 0 },
-  { UD_Ijno, { 0x0F, 0x81, 0xCD }, 3, UD_Ijo,  eflag_of, 0, 0, 0, 0 },
-  { UD_Ijb,  { 0x0F, 0x82, 0xCD }, 3, UD_Ijae, 0, eflag_cf, 0, 0, 0 },
-  { UD_Ijae, { 0x0F, 0x83, 0xCD }, 3, UD_Ijb,  eflag_cf, 0, 0, 0, 0 },
-  { UD_Ijz,  { 0x0F, 0x84, 0xCD }, 3, UD_Ijnz, 0, eflag_zf, 0, 0, 0 },
-  { UD_Ijnz, { 0x0F, 0x85, 0xCD }, 3, UD_Ijz,  eflag_zf, 0, 0, 0, 0 },
-  { UD_Ijbe, { 0x0F, 0x86, 0xCD }, 3, UD_Ija,  eflag_cf | eflag_zf, 0, 0, 0, 1 },
-  { UD_Ija,  { 0x0F, 0x87, 0xCD }, 3, UD_Ijbe, eflag_cf | eflag_zf, 0, 0, 0, 0 },
-  { UD_Ijs,  { 0x0F, 0x88, 0xCD }, 3, UD_Ijns, 0, eflag_sf, 0, 0, 0 },
-  { UD_Ijns, { 0x0F, 0x89, 0xCD }, 3, UD_Ijs,  eflag_sf, 0, 0, 0, 0 },
-  { UD_Ijp,  { 0x0F, 0x8A, 0xCD }, 3, UD_Ijnp, 0, eflag_pf, 0, 0, 0 },
-  { UD_Ijnp, { 0x0F, 0x8B, 0xCD }, 3, UD_Ijp,  eflag_pf, 0, 0, 0, 0 },
-  { UD_Ijl,  { 0x0F, 0x8C, 0xCD }, 3, UD_Ijge, 0, 0, 0, eflag_sf | eflag_of, 0 },
-  { UD_Ijge, { 0x0F, 0x8D, 0xCD }, 3, UD_Ijl,  0, 0, eflag_sf | eflag_of, 0, 0 },
-  { UD_Ijle, { 0x0F, 0x8E, 0xCD }, 3, UD_Ijg,  eflag_zf, 0, eflag_sf | eflag_of, 0, 1 },
-  { UD_Ijg,  { 0x0F, 0x8F, 0xCD }, 3, UD_Ijle, eflag_zf, 0, eflag_sf | eflag_of, 0, 0 }
+  { UD_Ijo,   UD_Ijno, 0, eflag_of, 0, 0, 0 },
+  { UD_Ijno,  UD_Ijo,  eflag_of, 0, 0, 0, 0 },
+  { UD_Ijb,   UD_Ijae, 0, eflag_cf, 0, 0, 0 },
+  { UD_Ijae,  UD_Ijb,  eflag_cf, 0, 0, 0, 0 },
+  { UD_Ijz,   UD_Ijnz, 0, eflag_zf, 0, 0, 0 },
+  { UD_Ijnz,  UD_Ijz,  eflag_zf, 0, 0, 0, 0 },
+  { UD_Ijbe,  UD_Ija,  eflag_cf | eflag_zf, 0, 0, 0, 1 },
+  { UD_Ija,   UD_Ijbe, eflag_cf | eflag_zf, 0, 0, 0, 0 },
+  { UD_Ijs,   UD_Ijns, 0, eflag_sf, 0, 0, 0 },
+  { UD_Ijns,  UD_Ijs,  eflag_sf, 0, 0, 0, 0 },
+  { UD_Ijp,   UD_Ijnp, 0, eflag_pf, 0, 0, 0 },
+  { UD_Ijnp,  UD_Ijp,  eflag_pf, 0, 0, 0, 0 },
+  { UD_Ijl,   UD_Ijge, 0, 0, 0, eflag_sf | eflag_of, 0 },
+  { UD_Ijge,  UD_Ijl,  0, 0, eflag_sf | eflag_of, 0, 0 },
+  { UD_Ijle,  UD_Ijg,  eflag_zf, 0, eflag_sf | eflag_of, 0, 1 },
+  { UD_Ijg,   UD_Ijle, eflag_zf, 0, eflag_sf | eflag_of, 0, 0 }
 };
 
 void Tracer::evaluate_instruction() {
@@ -644,25 +681,40 @@ void Tracer::evaluate_instruction() {
       }
     }
 
-    uint8_t lbuffer[16] = {
-      0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa,
-      0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa
-    };
+    SimpleCompiler compiler(buffer.get());
 
-    uint8_t buffer_used = 0;
+    auto cb_b = compiler.ConditionalJump(alternate_instructions, AlignedInstructions::get_asm_mnem(emit));
 
-    for(int i = 0; i < sizeof(jump_opts); i++) {
-      if(jump_opts[i].code == emit) {
-        memcpy(lbuffer, jump_opts[i].true_encoding, jump_opts[i].true_encoding_len);
-        buffer_used += jump_opts[i].true_encoding_len;
+    auto written = compiler.finalize();
+    cb_b.replace_stump<uint64_t>(0xfafafafafafafafa, written.getRawBuffer());
+    return;
 
-        buffer_used += 4; // the relative jump address
-        CodeBuffer buff((mem_loc_t)&lbuffer, buffer_used);
-        auto written = buffer->writeToEnd(buff);
-        // TODO: make written do something to replace to jump address
-        return;
-      }
-    }
+    // uint8_t lbuffer[16] = {
+    //   0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa,
+    //   0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa
+    // };
+
+    // uint8_t buffer_used = 0;
+
+    // SimpleCompiler resume_comp(buffer.get());
+
+    // auto resume_cb = compiler.MakeResumeTraceBlock(ud_insn_off(&disassm));
+    // auto resume_label = compiler.newLabel();
+    // compiler
+
+
+    // for(int i = 0; i < sizeof(jump_opts); i++) {
+    //   if(jump_opts[i].code == emit) {
+    //     memcpy(lbuffer, jump_opts[i].true_encoding, jump_opts[i].true_encoding_len);
+    //     buffer_used += jump_opts[i].true_encoding_len;
+
+    //     buffer_used += 4; // the relative jump address
+    //     CodeBuffer buff((mem_loc_t)&lbuffer, buffer_used);
+    //     auto written = buffer->writeToEnd(buff);
+    //     // TODO: make written do something to replace to jump address
+    //     return;
+    //   }
+    // }
 
     // something went wrong, we should not be here
     assert(0);
@@ -712,8 +764,10 @@ void Tracer::evaluate_instruction() {
       // written.replace_stump<uint64_t>(0xfafafafafafafafa, rv);
 
       SimpleCompiler compiler(buffer.get());
-      compiler.TestRegister(ri, rv);
+      auto r_cb = compiler.TestRegister(ud_insn_off(&disassm), ri, rv);
       auto written = compiler.finalize();
+
+      r_cb.replace_stump<uint64_t>(0xfafafafafafafafa, written.getRawBuffer());
 
       jump_dest = rv;
     } else if(opr->type == UD_OP_MEM) {
@@ -735,7 +789,10 @@ void Tracer::evaluate_instruction() {
         int i = ud_register_to_sys(opr->base);
         auto v = get_opr_value(opr);
         register_t rv = ((register_t*)(regs_struct))[i];
-        compiler.TestRegister(i, rv);
+        auto r_cb = compiler.TestRegister(ud_insn_off(&disassm), i, rv);
+        auto written = compiler.finalize();
+        r_cb.replace_stump<uint64_t>(0xfafafafafafafafa, written.getRawBuffer());
+
         jump_dest = *(mem_loc_t*)v.address;
       }
     }
@@ -768,6 +825,7 @@ void Tracer::evaluate_instruction() {
     assert(opr2 == NULL); // not 100% sure what the second opr would be used for
 
     register_t ret_addr = ud_insn_off(&disassm) + ud_insn_len(&disassm);
+    mem_loc_t call_pc = 0;
 
     last_call_instruction = icount;
 
@@ -775,7 +833,7 @@ void Tracer::evaluate_instruction() {
       if(opr1->type == UD_OP_IMM) {
         switch(opr1->size) {
         case 32:
-          set_pc(udis_loc & ~0xffffffff | opr1->lval.udword);
+          call_pc = udis_loc & ~0xffffffff | opr1->lval.udword;
           break;
         default:
           assert(0);
@@ -784,10 +842,10 @@ void Tracer::evaluate_instruction() {
         assert(opr1->type == UD_OP_JIMM);
         switch(opr1->size) {
         case 16:
-          set_pc(udis_loc + opr1->lval.sword);
+          call_pc = udis_loc + opr1->lval.sword;
           break;
         case 32:
-          set_pc(udis_loc + opr1->lval.sdword);
+          call_pc = udis_loc + opr1->lval.sdword;
           break;
         default:
           assert(0);
@@ -795,34 +853,49 @@ void Tracer::evaluate_instruction() {
       }
     } else {
       // vtable branching
+      // TODO: check that the register is pointing at the same location in memory
       opr_value ta = get_opr_value(opr1);
       assert(ta.is_ptr);
-      register_t value = *ta.address_ptr;
+      mem_loc_t value = *ta.address_ptr;
       SimpleCompiler compiler(buffer.get());
-      compiler.TestMemoryLocation(ta.address, value);
-      compiler.finalize();
-      set_pc(value);
+      //compiler.TestRegister(
+      auto r_cb = compiler.TestMemoryLocation(ud_insn_off(&disassm), ta.address, value);
+      auto written = compiler.finalize();
+      r_cb.replace_stump<uint64_t>(0xfafafafafafafafa, written.getRawBuffer());
+      call_pc = value;
     }
+
+    assert(call_pc != 0);
 
     last_call_generated_op = buffer->getOffset();
     last_call_ret_addr = ret_addr;
 
-    if(!redmagic::manager->should_trace_method((void*)udis_loc)) {
+    if(!redmagic::manager->should_trace_method((void*)call_pc)) {
       // check if this is some method that we should avoid inlining
-      auto buf_loc = buffer->getRawBuffer() + buffer->getOffset();
-      auto written = buffer->writeToEnd(cb_asm_call_direct);
-      written.replace_stump<uint64_t>(0xfafafafafafafafa, udis_loc);
+      // auto buf_loc = buffer->getRawBuffer() + buffer->getOffset();
+      // auto written = buffer->writeToEnd(cb_asm_call_direct);
+      // written.replace_stump<uint64_t>(0xfafafafafafafafa, call_pc);
+      SimpleCompiler compiler(buffer.get());
+      compiler.call(asmjit::imm_ptr(call_pc));
+      auto cb = compiler.finalize();
+
       set_pc(ret_addr);
 
       current_location = udis_loc;
       write_interrupt_block();
-      continue_program(buf_loc);
+      continue_program(cb.getRawBuffer());
 
     } else {
       // inline this method, so push the return address and continue
-      auto written = buffer->writeToEnd(cb_asm_push_stack);
-      written.replace_stump<uint64_t>(0xfafafafafafafafa, ret_addr);
+      // auto written = buffer->writeToEnd(cb_asm_push_stack);
+      // written.replace_stump<uint64_t>(0xfafafafafafafafa, ret_addr);
+      SimpleCompiler compiler(buffer.get());
+      // compiler.mov(asmjit::x86::r15, asmjit::imm(ret_addr));
+      // compiler.push(asmjit::imm(ret_addr));
+      compiler.Push64bitValue(ret_addr);
+      auto w = compiler.finalize();
       push_stack(ret_addr);
+      set_pc(call_pc);
     }
 
     return;

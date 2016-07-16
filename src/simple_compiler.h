@@ -22,6 +22,9 @@ namespace redmagic {
     ~SimpleCompiler();
     CodeBuffer finalize();
 
+    // write to the bottom of the code buffer, for generating a trampoline
+    CodeBuffer finalize_bottom();
+
     // stash the register
     void protect_register(int id);
     void restore_registers();
@@ -39,15 +42,26 @@ namespace redmagic {
     void RegisterToMem(int reg, mem_loc_t where);
     void SetRegister(int reg, register_t val);
     void PushMemoryLocationValue(mem_loc_t where);
+    void Push64bitValue(uint64_t value);
 
-    void TestRegister(int reg, register_t val);
-    void TestMemoryLocation(mem_loc_t where, register_t val);
+    CodeBuffer TestRegister(mem_loc_t resume_pc, int reg, register_t val);
+    CodeBuffer TestMemoryLocation(mem_loc_t resume_pc, mem_loc_t where, register_t val);
 
-    mem_loc_t MakeResumeTraceBlock(mem_loc_t tracer_base_ptr, mem_loc_t resume_pc);
+    void TestOperand(mem_loc_t resume_pc, const asmjit::Operand& opr, register_t val);
+
+    CodeBuffer MakeResumeTraceBlock(mem_loc_t resume_pc);
 
     uint64_t* MakeCounter();
 
+    // return the CodeBuffer of the destination jump block instead of self
+    CodeBuffer ConditionalJump(mem_loc_t resume_pc, enum asmjit::X86InstId mnem);
+
   private:
+    void ResumeBlockJump(mem_loc_t resume_pc);
+    void write_restore_registers(uint64_t restore);
+
+  private:
+
     CodeBuffer *buffer;
     mem_loc_t buffer_cursor;
 

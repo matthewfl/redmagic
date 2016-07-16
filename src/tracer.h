@@ -23,8 +23,18 @@ namespace redmagic {
 
     void Run(void *);
 
+    // we are done with the loop, so resume normal execution
     void* EndTraceFallThrough();
+    // we are jumping back to the top of the loop, so do that
     void* EndTraceLoop();
+
+    // generate a temp disable command, sets the thread local where to resume to address
+    void* TempDisableTrace();
+
+  public:
+    // std::mutex _generation_mutex;
+    // std::unique_lock<std::mutex> generation_lock = std::unique_lock<std::mutex>(_generation_mutex);
+
   private:
 
 
@@ -68,6 +78,11 @@ namespace redmagic {
 #endif
 
     // static void tracer_start_cb(intptr_t ptr);
+
+  public:
+    std::atomic<mem_loc_t> tracing_from;
+
+
 
   private:
 
