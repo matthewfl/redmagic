@@ -189,7 +189,6 @@ CodeBuffer SimpleCompiler::TestMemoryLocation(mem_loc_t resume_pc, mem_loc_t whe
   if(val > 0x7fffffff)
     scr2 = get_scratch_register();
 
-
   SimpleCompiler resume_block(buffer);
   resume_block.clobbered_registers |= clobbered_registers;
   resume_block.popf();

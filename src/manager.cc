@@ -15,6 +15,8 @@ namespace redmagic {
 
   thread_local Tracer* tracer = nullptr;
   thread_local void* trace_id = nullptr;
+
+  thread_local vector<return_addr_info> trace_return_addr;
 };
 
 
@@ -36,8 +38,7 @@ extern "C" void* red_user_backwards_branch(void *id, void *ret_addr) {
 }
 
 extern "C" void* red_user_fellthrough_branch(void *id, void *ret_addr) {
-  assert(0);
-  return NULL;
+  return manager->fellthrough_branch(id);
 }
 
 extern "C" void* red_user_ensure_not_traced(void *_, void *ret_addr) {
@@ -92,6 +93,16 @@ static const char *avoid_inlining_methods[] = {
   "redmagic_temp_enable",
 };
 
+// namespace redmagic {
+//   Tracer* get_tracer() {
+//     if(tracer == nullptr) {
+//       auto buff = make_shared<CodeBuffer>(4 * 1024 * 1024);
+//       tracer = new Tracer(buff);
+//     }
+//     return tracer;
+//   }
+// }
+
 Manager::Manager() {
   // need to preload methods that we do no want to trace
   // use RTLD_NOW to try and force it to resolve the symbols address rather than delaying
@@ -99,7 +110,7 @@ Manager::Manager() {
   for(int i = 0; avoid_inlining_methods[i] != NULL; i++) {
     void *addr = dlsym(dlh, avoid_inlining_methods[i]);
     assert(addr);
-    no_trace_methods.insert((uint64_t)addr);
+    no_trace_methods.insert(addr);
   }
   dlclose(dlh);
 
@@ -111,13 +122,14 @@ void* Manager::begin_trace(void *id, void *ret_addr) {
   Tracer *l;
   {
     assert(tracer == nullptr);
+    branch_info *info = &branches[id];
+    assert(info->tracer == nullptr);
     auto buff = make_shared<CodeBuffer>(4 * 1024 * 1024);
     l = tracer = new Tracer(buff);
-
+    l->tracing_from = (mem_loc_t)ret_addr;
     // int r = mprotect(this, 4*1024, PROT_READ | PROT_WRITE);
     // assert(!r);
-
-    branches[(uint64_t)id].tracer = l;
+    info->tracer = l;
 
 
     // r = mprotect(this, 4*1024, PROT_NONE);
@@ -135,17 +147,19 @@ void* Manager::end_trace(void *id) {
   Tracer *l;
   void *ret;
   {
+    branch_info *info = &branches[id];
     assert(id == trace_id);
     //if(tracer) {
     //trace[id] = tracer;
+    assert(tracer == info->tracer);
     l = tracer;
-    //tracer = nullptr;
+    ret = l->EndTraceFallThrough();
     trace_id = nullptr;
     is_traced = false;
-    ret = l->EndTraceLoop();
+    info->starting_point = l->get_loop_location();
+    l->tracing_from.store(0);
   }
   return ret;
-  //}
 }
 
 void* Manager::jump_to_trace(void *id) {
@@ -156,18 +170,24 @@ void* Manager::jump_to_trace(void *id) {
 void* Manager::backwards_branch(void *id, void *ret_addr) {
   if(is_traced) {
     if(id == trace_id) {
-      return end_trace(id);
+      return tracer->EndTraceLoop();
+    } else {
+      // then we should make a new tracer and jump to that
+      return begin_trace(id, ret_addr);
     }
   } else {
-    // int r = mprotect(this, 4*1024, PROT_READ | PROT_WRITE);
-    // assert(!r);
 
-    branch_info *info = &branches[(uint64_t)id];
+    branch_info *info = &branches[id];
+    if(info->starting_point != nullptr) {
+      return info->starting_point;
+    }
+    if(info->tracer != nullptr) {
+      // there is already a tracer with some other thread running on this item
+      // which means that we are going to wait for that thread to finish its trace
+      // TODO: make this use atomics
+      return NULL;
+    }
     int cnt = info->count++;
-
-    // r = mprotect(this, 4*1024, PROT_NONE);
-    // assert(!r);
-
 
     if(cnt > CONF_NUMBER_OF_JUMPS_BEFORE_TRACE) {
       return begin_trace(id, ret_addr);
@@ -179,7 +199,16 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
 void* Manager::fellthrough_branch(void *id) {
   if(trace_id == id) {
     if(is_traced) {
-      return end_trace(id);
+      branch_info *info = &branches[id];
+      void *ret;
+      Tracer *l = tracer;
+      ret = l->EndTraceFallThrough();
+      is_traced = false;
+      trace_id = nullptr;
+      info->starting_point = l->get_loop_location();
+      info->tracer = nullptr;
+      l->tracing_from.store(0);
+      return ret;
     }
   }
   return NULL;
@@ -204,7 +233,7 @@ bool Manager::should_trace_method(void *id) {
   // int r = mprotect(this, 4*1024, PROT_READ | PROT_WRITE);
   // assert(!r);
 
-  if(no_trace_methods.find((uint64_t)id) != no_trace_methods.end())
+  if(no_trace_methods.find(id) != no_trace_methods.end())
     ret = false;
 
   // r = mprotect(this, 4*1024, PROT_NONE);

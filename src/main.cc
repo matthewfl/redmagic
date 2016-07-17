@@ -25,15 +25,15 @@ int main(int argc, char* argv[]) {
 
   redmagic_start();
 
-  int program[] = {
+  int program2[] = {
     PRINT_NUM, 0,
     JUMP_BACK, 0,
     EXIT,
   };
 
-  int program2[] = {
+  int program[] = {
     PRINT_NUM, 0,
-    COND_SET, 1000,
+    COND_SET, 100,
     PRINT_NUM, 1,
     COND_ADD, -1,
     COND_JUMP, 4,  // print num
@@ -58,7 +58,7 @@ int main(int argc, char* argv[]) {
       pc = program[pc + 1];
       break;
     case COND_JUMP:
-      if(cond_var) {
+      if(cond_var != 0) {
         redmagic_backwards_branch((void*)pc);
         pc = program[pc + 1];
       } else {
@@ -75,6 +75,7 @@ int main(int argc, char* argv[]) {
       pc += 2;
       break;
     case EXIT:
+      cout << "hitting normal exit case\n";
       exit(0);
     default:
       exit(-1);

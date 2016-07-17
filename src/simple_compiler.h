@@ -16,6 +16,7 @@ namespace redmagic {
       buffer_cursor(buffer->getRawBuffer() + buffer->getOffset()),
       asmjit::X86Assembler(&runtime)
     {
+      assert(buffer->can_write_buffer);
     }
 
     // trigger generating the code to the buffer;

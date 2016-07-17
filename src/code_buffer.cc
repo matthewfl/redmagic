@@ -32,11 +32,11 @@ CodeBuffer::~CodeBuffer() {
   }
 }
 
-CodeBuffer::CodeBuffer(mem_loc_t start, size_t size):
+CodeBuffer::CodeBuffer(mem_loc_t start, size_t size, bool override_can_write):
   buffer((uint8_t*)start),
   size(size),
   owns_buffer(false),
-  can_write_buffer(false),
+  can_write_buffer(override_can_write),
   buffer_consumed(size)
 {
 }

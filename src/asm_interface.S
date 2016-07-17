@@ -59,7 +59,6 @@ red_asm_begin_block:
 
 // restart the trace on a bad branch inlined
   .global red_asm_restart_trace
-
 red_asm_restart_trace:
   // the target rip has been put into r15
   m_push_all_regs
@@ -75,8 +74,20 @@ red_asm_restart_trace:
   movq %r9, 64(%rsp)
 
   call red_resume_trace@plt
+  m_pop_all_regs
+  jmpq *-TRACE_RESUME_ADDRESS_OFFSET(%rsp)
+
+
+  // at the end of a trace where we want to possibly end this action and resume to "normal" code
+  // might end up returning to a another trace block
+  .global red_asm_end_trace
+red_asm_end_trace:
+  call red_end_trace@plt
   jmp *%rax
 
+
+testing:
+  movl $0xfafafafa, -10(%rsp)
 
 
 

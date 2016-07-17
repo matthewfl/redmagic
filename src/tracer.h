@@ -17,11 +17,13 @@ namespace redmagic {
     Tracer(std::shared_ptr<CodeBuffer> buffer);
     ~Tracer();
 
+    // create a new tracer with jumps to new address
     void* Start(void *start_addr);
+
 
     inline mem_loc_t _get_udis_location() { return udis_loc++; }
 
-    void Run(void *);
+    void Run(struct user_regs_struct*);
 
     // we are done with the loop, so resume normal execution
     void* EndTraceFallThrough();
@@ -30,6 +32,10 @@ namespace redmagic {
 
     // generate a temp disable command, sets the thread local where to resume to address
     void* TempDisableTrace();
+
+    inline void *get_loop_location() { return (void*)loop_start_location; }
+
+    inline mem_loc_t get_origional_pc() { return udis_loc; }
 
   public:
     // std::mutex _generation_mutex;
@@ -44,6 +50,7 @@ namespace redmagic {
     void evaluate_instruction();
     void replace_rip_instruction();
 
+    // continue program might not return, so any cleanup needs to be peformed before it is called
     void continue_program(mem_loc_t);
     void write_interrupt_block();
 
@@ -67,7 +74,7 @@ namespace redmagic {
       union {
         mem_loc_t address;
         register_t *address_ptr;
-         register_t value;
+        register_t value;
       };
     };
 
@@ -95,9 +102,9 @@ namespace redmagic {
       register_t rbp;
       register_t resume_addr; // not used?
       register_t stack_pointer;
-    } resume_struct;
+    } resume_struct = {0};
 
-    struct user_regs_struct *regs_struct;
+    struct user_regs_struct *regs_struct = nullptr;
     int64_t move_stack_by = 0;
 
     std::shared_ptr<CodeBuffer> buffer;

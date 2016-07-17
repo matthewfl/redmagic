@@ -74,7 +74,9 @@ Tracer::~Tracer() {
 }
 
 
-void red_begin_tracing(void *other_stack, void* __, Tracer* tracer) {
+void red_begin_tracing(struct user_regs_struct *other_stack, void* __, Tracer* tracer) {
+
+
 
   //tracer->regs_struct = other_stack;
   tracer->Run(other_stack);
@@ -83,20 +85,52 @@ void red_begin_tracing(void *other_stack, void* __, Tracer* tracer) {
   assert(0);
 }
 
-extern "C" void* red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_address, struct user_regs_struct *regs_stack_ptr) {
+extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_address, struct user_regs_struct *regs_struct) {
 
+  using redmagic::register_t;
   // the dummy address
   assert(write_jump_address != 0xfafafafafafafafa);
 
-  CodeBuffer jbuf(write_jump_address, 15);
-  SimpleCompiler jcompiler(&jbuf);
+  assert(regs_struct->rsp - TRACE_STACK_OFFSET == (register_t)regs_struct);
+
+  void *ret = NULL;
+  void *patch = NULL;
+
+  Tracer *l = tracer;
+  mem_loc_t desired = 0;
+  if(!l->tracing_from.compare_exchange_strong(desired, target_rip)) {
+    // we were not able to aquire the tracer for this thread, so create a new one
+    l = tracer = new Tracer(make_shared<CodeBuffer>(4 * 1024 * 1024));
+    // need to init the stack but must stash all registers...
+    assert(0);
+  }
+
+  // calling Start will invalidate the stack
+  ret = l->Start((void*)target_rip);
+  patch = l->get_loop_location();
 
 
+  // TODO: need to patch in the address only after the trace is done
+  // otherwise the concurrent threads may have an issue
+
+  // assert(patch != NULL);
+  // CodeBuffer jbuf(write_jump_address, 15, true);
+  // jbuf.setOffset(0);
+  // SimpleCompiler jcompiler(&jbuf);
+  // jcompiler.jmp(asmjit::imm_ptr(patch));
+  // auto w = jcompiler.finalize();
+
+  assert(ret != NULL);
 
 
-  assert(0);
+  *((register_t*)(regs_struct->rsp - TRACE_RESUME_ADDRESS_OFFSET)) = (register_t)ret;
+  //return ret;
+}
 
-  return NULL;
+extern "C" void* red_end_trace(mem_loc_t normal_end_address) {
+
+
+  return (void*)normal_end_address;
 }
 
 extern "C" void red_asm_start_tracing(void*, void*, void*, void*);
@@ -106,7 +140,6 @@ extern "C" void red_asm_begin_block();
 // extern "C" void _dl_fixup();
 
 void* Tracer::Start(void *start_addr) {
-
   //generation_lock.lock();
 
   set_pc((mem_loc_t)start_addr);
@@ -117,12 +150,17 @@ void* Tracer::Start(void *start_addr) {
   using namespace asmjit;
   SimpleCompiler compiler(buffer.get());
   //compiler.mov(x86::rdx, x86::rsp);
+  // stash the values of the register that we are about to override
+  compiler.mov(x86::ptr(x86::rsp, static_cast<int32_t>(-TRACE_STACK_OFFSET - sizeof(struct user_regs_struct))), x86::rdx);
+  compiler.mov(x86::ptr(x86::rsp, static_cast<int32_t>(-TRACE_STACK_OFFSET - sizeof(struct user_regs_struct) - sizeof(register_t))), x86::rsi);
+
   compiler.mov(x86::rdx, imm_ptr(this)); // argument 3
   compiler.mov(x86::rsi, imm_ptr(&red_begin_tracing));
 
   //mem_loc_t stack_ptr = ((stack + 8*1024) & ~(4*1024 - 1)) + TRACE_STACK_SIZE;
   mem_loc_t stack_ptr = (((mem_loc_t)stack_) + sizeof(stack_)) & ~63;
 
+  resume_struct = {0};
   resume_struct.stack_pointer = (register_t)stack_ptr - sizeof(mem_loc_t);
   *(void**)(stack_ptr - sizeof(mem_loc_t)) = (void*)&red_asm_begin_block;
   //compiler.mov(x86::rsp, imm_ptr(stack - sizeof(stack)));
@@ -168,8 +206,12 @@ bool Tracer::debug_check_abort() {
 }
 #endif
 
-void Tracer::Run(void *other_stack) {
-  regs_struct = (struct user_regs_struct*)other_stack;
+void Tracer::Run(struct user_regs_struct *other_stack) {
+  regs_struct = other_stack;
+
+  regs_struct->rdx = ((register_t*)(regs_struct + 1))[0];
+  regs_struct->rsi = ((register_t*)(regs_struct + 1))[1];
+
 
   current_location = udis_loc;
 
@@ -254,8 +296,17 @@ void Tracer::Run(void *other_stack) {
   }
 }
 
-void* Tracer::EndTraceFallThrough() {
+extern "C" void red_asm_end_trace();
 
+void* Tracer::EndTraceFallThrough() {
+  assert(icount - last_call_instruction < 2);
+  buffer->setOffset(last_call_generated_op);
+  SimpleCompiler compiler(buffer.get());
+  compiler.mov(asmjit::x86::rdi, asmjit::imm_u(last_call_ret_addr));
+  compiler.jmp(asmjit::imm_ptr(&red_asm_end_trace));
+  auto w = compiler.finalize();
+  tracing_from = 0;
+  return (void*)w.getRawBuffer();
 }
 
 void* Tracer::EndTraceLoop() {
@@ -265,6 +316,7 @@ void* Tracer::EndTraceLoop() {
   buffer->setOffset(last_call_generated_op);
   SimpleCompiler compiler(buffer.get());
   compiler.jmp(asmjit::imm_ptr(loop_start_location));
+  tracing_from = 0;
   return (void*)loop_start_location;
 }
 
@@ -805,14 +857,18 @@ void Tracer::evaluate_instruction() {
     if(last_call_instruction + 1 == icount) {
       // then the first operation in this method was a jump, which means that we were probably jumping through a redirect with the dynamic linker
       if(!manager->should_trace_method((void*)jump_dest)) {
-        buffer->setOffset(last_call_generated_op);
-        pop_stack();
-        set_pc(last_call_ret_addr);
-        SimpleCompiler compiler(buffer.get());
-        compiler.call(asmjit::imm_ptr(jump_dest));
-        auto written = compiler.finalize();
-        write_interrupt_block();
-        continue_program(written.getRawBuffer());
+        mem_loc_t cont_addr;
+        {
+          buffer->setOffset(last_call_generated_op);
+          pop_stack();
+          set_pc(last_call_ret_addr);
+          SimpleCompiler compiler(buffer.get());
+          compiler.call(asmjit::imm_ptr(jump_dest));
+          auto written = compiler.finalize();
+          write_interrupt_block();
+          cont_addr = written.getRawBuffer();
+        }
+        continue_program(cont_addr);
         return;
       }
     }
@@ -875,15 +931,19 @@ void Tracer::evaluate_instruction() {
       // auto buf_loc = buffer->getRawBuffer() + buffer->getOffset();
       // auto written = buffer->writeToEnd(cb_asm_call_direct);
       // written.replace_stump<uint64_t>(0xfafafafafafafafa, call_pc);
-      SimpleCompiler compiler(buffer.get());
-      compiler.call(asmjit::imm_ptr(call_pc));
-      auto cb = compiler.finalize();
+      mem_loc_t cont_addr;
+      {
+        SimpleCompiler compiler(buffer.get());
+        compiler.call(asmjit::imm_ptr(call_pc));
+        auto cb = compiler.finalize();
 
-      set_pc(ret_addr);
+        set_pc(ret_addr);
 
-      current_location = udis_loc;
-      write_interrupt_block();
-      continue_program(cb.getRawBuffer());
+        current_location = udis_loc;
+        write_interrupt_block();
+        cont_addr = cb.getRawBuffer();
+      }
+      continue_program(cont_addr);
 
     } else {
       // inline this method, so push the return address and continue

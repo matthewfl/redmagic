@@ -17,7 +17,7 @@
 #include <thread>
 #include <atomic>
 #include <unordered_map>
-//#include <vector>
+#include <vector>
 #include <unordered_set>
 
 #include <mutex>
@@ -44,7 +44,6 @@ namespace redmagic {
   typedef decltype(((struct user_regs_struct*)(NULL))->r15) register_t;
   typedef uint64_t mem_loc_t; // a memory location in the debugged program
 
-
   class Manager {
   public:
     Manager();
@@ -65,13 +64,14 @@ namespace redmagic {
     struct branch_info {
       int count = 0;
       Tracer *tracer = nullptr;
+      void *starting_point = nullptr;
     };
 
 
     // std::map<void*, int> branch_count;
     // std::map<void*, Tracer*> trace;
-    std::unordered_map<uint64_t, branch_info> branches;
-    std::unordered_set<uint64_t> no_trace_methods;
+    std::unordered_map<void*, branch_info> branches;
+    std::unordered_set<void*> no_trace_methods;
 
     // tbb::concurrent_unordered_map<uint64_t, branch_info> branches;
     // tbb::concurrent_unordered_set<uint64_t> no_trace_methods;
@@ -79,10 +79,22 @@ namespace redmagic {
     friend class Tracer;
   };
 
+  struct return_addr_info {
+    Tracer *tracer;
+    void *addr;
+    void *trace_id;
+  };
+
+  extern thread_local std::vector<return_addr_info> trace_return_addr;
+  extern thread_local Tracer *tracer; // current running tracer
+  extern thread_local void *trace_id; // id of current executing trace
+  extern Manager *manager;
+
+
   class CodeBuffer final {
   public:
     CodeBuffer(size_t size);
-    CodeBuffer(mem_loc_t start, size_t size);
+    CodeBuffer(mem_loc_t start, size_t size, bool override_can_write=false);
     CodeBuffer();
 
     CodeBuffer(CodeBuffer &&x);
@@ -155,6 +167,8 @@ namespace redmagic {
   public:
     std::mutex generation_mutex;
     // std::unique_lock<std::mutex> generation_lock = std::unique_lock<std::mutex>(_generation_mutex);
+
+    CodeBuffer *_next;
 
   private:
     uint8_t *buffer;
