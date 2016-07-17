@@ -42,6 +42,9 @@ int main(int argc, char* argv[]) {
 
   // sleep(1);
 
+  // init so that the dynamic resolve doesn't cause an early abort
+  redmagic_fellthrough_branch((void*)123123);
+
   int pc = 0;
 
   int cond_var = 0;
@@ -49,7 +52,9 @@ int main(int argc, char* argv[]) {
   while(1) {
     switch(program[pc]) {
     case PRINT_NUM:
+      redmagic_temp_disable();
       cout << program[pc + 1] << endl;
+      redmagic_temp_enable();
       //printf("%i\n", program[pc + 1]);
       pc += 2;
       break;

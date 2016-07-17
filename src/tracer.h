@@ -32,6 +32,7 @@ namespace redmagic {
 
     // generate a temp disable command, sets the thread local where to resume to address
     void* TempDisableTrace();
+    void TempEnableTrace(void *resume_pc) { set_pc((uint64_t)resume_pc); }
 
     inline void *get_loop_location() { return (void*)loop_start_location; }
 
@@ -88,7 +89,10 @@ namespace redmagic {
 
   public:
     std::atomic<mem_loc_t> tracing_from;
+    uint32_t owning_thread;
 
+
+    bool did_abort = false;
 
 
   private:
@@ -128,6 +132,7 @@ namespace redmagic {
     mem_loc_t last_call_ret_addr;
 
     mem_loc_t loop_start_location;
+
 
     // mem_loc_t stack;
 

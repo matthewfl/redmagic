@@ -9,7 +9,8 @@ using namespace std;
 namespace redmagic {
   thread_local bool is_traced = false;
   thread_local bool is_temp_disabled = false;
-  thread_local bool is_running_compiled = false;
+  thread_local void *temp_disable_resume = nullptr;
+  //thread_local bool is_running_compiled = false;
 
   Manager *manager = nullptr;
 
@@ -17,7 +18,9 @@ namespace redmagic {
   thread_local void* trace_id = nullptr;
 
   thread_local vector<return_addr_info> trace_return_addr;
-};
+
+  thread_local uint32_t this_thread_id = 0;
+}
 
 
 
@@ -47,13 +50,14 @@ extern "C" void* red_user_ensure_not_traced(void *_, void *ret_addr) {
 }
 
 extern "C" void* red_user_temp_disable(void *_, void *ret_addr) {
-  assert(0);
-  return NULL;
+  return manager->temp_disable();
+  //return NULL;
 }
 
 extern "C" void* red_user_temp_enable(void *_, void *ret_addr) {
-  assert(0);
-  return NULL;
+  return manager->temp_enable(ret_addr);
+  //assert(0);
+  //return NULL;
 }
 
 extern "C" void *__real_malloc(size_t);
@@ -116,6 +120,13 @@ Manager::Manager() {
 
 }
 
+uint32_t Manager::get_thread_id() {
+  if(this_thread_id == 0) {
+    this_thread_id = ++thread_id_counter;
+  }
+  return this_thread_id;
+}
+
 void* Manager::begin_trace(void *id, void *ret_addr) {
 
   void *ret;
@@ -127,6 +138,7 @@ void* Manager::begin_trace(void *id, void *ret_addr) {
     auto buff = make_shared<CodeBuffer>(4 * 1024 * 1024);
     l = tracer = new Tracer(buff);
     l->tracing_from = (mem_loc_t)ret_addr;
+    l->owning_thread = get_thread_id();
     // int r = mprotect(this, 4*1024, PROT_READ | PROT_WRITE);
     // assert(!r);
     info->tracer = l;
@@ -138,6 +150,7 @@ void* Manager::begin_trace(void *id, void *ret_addr) {
     trace_id = id;
     ret = l->Start(ret_addr);
     is_traced = true;
+    info->starting_point = l->get_loop_location();
   }
 
   return ret;
@@ -178,15 +191,22 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
   } else {
 
     branch_info *info = &branches[id];
-    if(info->starting_point != nullptr) {
-      return info->starting_point;
-    }
+
     if(info->tracer != nullptr) {
       // there is already a tracer with some other thread running on this item
       // which means that we are going to wait for that thread to finish its trace
       // TODO: make this use atomics
+
+      // TODO: if this aborted, then need to make this have written the resume block at the bottom and
+      assert(!info->tracer->did_abort);
       return NULL;
     }
+    // if the tracer is null then it either isn't being traced, hasn't started yet or has already finished
+    if(info->starting_point != nullptr) {
+      // with tracer == null and starting not null then we have already finished this trace so jump to it
+      return info->starting_point;
+    }
+    // don't care about atomic since we are just trying to get an estimate, so if we lose some counts it is fine
     int cnt = info->count++;
 
     if(cnt > CONF_NUMBER_OF_JUMPS_BEFORE_TRACE) {
@@ -205,12 +225,43 @@ void* Manager::fellthrough_branch(void *id) {
       ret = l->EndTraceFallThrough();
       is_traced = false;
       trace_id = nullptr;
-      info->starting_point = l->get_loop_location();
+      //info->starting_point = l->get_loop_location();
       info->tracer = nullptr;
-      l->tracing_from.store(0);
+      //l->tracing_from.store(0);
       return ret;
     }
   }
+  return NULL;
+}
+
+void* Manager::temp_disable() {
+  if(is_traced) {
+    return tracer->TempDisableTrace();
+  } else {
+    if(is_temp_disabled) {
+      ::perror("calling redmagic_temp_disable when the jit is already disabled");
+      ::exit(1);
+    }
+    is_temp_disabled = true;
+  }
+  return NULL;
+}
+
+void* Manager::temp_enable(void *resume_pc) {
+  void *r = temp_disable_resume;
+  if(r != nullptr) {
+    temp_disable_resume = nullptr;
+    if(is_traced) {
+      tracer->TempEnableTrace(resume_pc);
+    }
+    return r;
+  }
+  assert(!is_traced);
+  if(!is_temp_disabled) {
+    ::perror("calling redmagic_temp_enable when jit is already enabled");
+    ::exit(1);
+  }
+  is_temp_disabled = false;
   return NULL;
 }
 
@@ -228,27 +279,18 @@ namespace {
 
 bool Manager::should_trace_method(void *id) {
 
-  bool ret = true;
-
-  // int r = mprotect(this, 4*1024, PROT_READ | PROT_WRITE);
-  // assert(!r);
-
   if(no_trace_methods.find(id) != no_trace_methods.end())
-    ret = false;
-
-  // r = mprotect(this, 4*1024, PROT_NONE);
-  // assert(!r);
+    return false;
 
 
-  // somehow eventually causes a crash
-// #ifndef NDEBUG
-//   Dl_info dlinfo;
-//   if(dladdr(id, &dlinfo) && dlinfo.dli_fbase == self_dlinfo.dli_fbase) {
-//     //no_trace_methods.insert(id);
-//     assert(0);
-//     return false;
-//   }
-// #endif
+#ifndef NDEBUG
+  Dl_info dlinfo;
+  if(dladdr(id, &dlinfo) && dlinfo.dli_fbase == self_dlinfo.dli_fbase) {
+    //no_trace_methods.insert(id);
+    assert(0);
+    return false;
+  }
+#endif
 
-  return ret;
+  return true;
 }

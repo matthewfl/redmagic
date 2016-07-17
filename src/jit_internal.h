@@ -44,6 +44,8 @@ namespace redmagic {
   typedef decltype(((struct user_regs_struct*)(NULL))->r15) register_t;
   typedef uint64_t mem_loc_t; // a memory location in the debugged program
 
+  uint32_t get_thread_id();
+
   class Manager {
   public:
     Manager();
@@ -56,6 +58,11 @@ namespace redmagic {
     void* fellthrough_branch(void*);
 
     void ensure_not_traced();
+
+    void *temp_disable();
+    void *temp_enable(void *resume_pc);
+
+    uint32_t get_thread_id();
 
   private:
     bool should_trace_method(void *ptr);
@@ -73,6 +80,8 @@ namespace redmagic {
     std::unordered_map<void*, branch_info> branches;
     std::unordered_set<void*> no_trace_methods;
 
+    std::atomic<uint32_t> thread_id_counter;
+
     // tbb::concurrent_unordered_map<uint64_t, branch_info> branches;
     // tbb::concurrent_unordered_set<uint64_t> no_trace_methods;
 
@@ -88,6 +97,7 @@ namespace redmagic {
   extern thread_local std::vector<return_addr_info> trace_return_addr;
   extern thread_local Tracer *tracer; // current running tracer
   extern thread_local void *trace_id; // id of current executing trace
+  extern thread_local bool is_traced;
   extern Manager *manager;
 
 

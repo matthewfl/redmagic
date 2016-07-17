@@ -126,6 +126,14 @@ extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_addr
   *((register_t*)(regs_struct->rsp - TRACE_RESUME_ADDRESS_OFFSET)) = (register_t)ret;
   //return ret;
 }
+namespace redmagic {
+  extern thread_local void *temp_disable_resume;
+}
+
+extern "C" void red_set_temp_resume(void *resume_addr) {
+  assert(temp_disable_resume == nullptr);
+  temp_disable_resume = resume_addr;
+}
 
 extern "C" void* red_end_trace(mem_loc_t normal_end_address) {
 
@@ -320,6 +328,26 @@ void* Tracer::EndTraceLoop() {
   return (void*)loop_start_location;
 }
 
+void *Tracer::TempDisableTrace() {
+  assert(icount - last_call_instruction < 2);
+  buffer->setOffset(last_call_generated_op);
+  SimpleCompiler compiler(buffer.get());
+  auto label = compiler.newLabel();
+  //compiler.mov(asmjit::x86::rdi, asmjit::imm_u(0xfafafafafafafafa));
+  compiler.lea(asmjit::x86::rdi, asmjit::x86::ptr(label));
+  compiler.call(asmjit::imm_ptr(&red_set_temp_resume));
+  compiler.jmp(asmjit::imm_ptr(last_call_ret_addr));
+  compiler.mov(asmjit::x86::r15, asmjit::imm_u(0xdeadcafe));
+  compiler.bind(label);
+  auto written = compiler.finalize();
+  write_interrupt_block();
+
+  temp_disable_resume = (void*)(written.getRawBuffer() + written.getOffset());
+
+
+
+  return (void*)last_call_ret_addr;
+}
 
 extern "C" void* red_asm_resume_eval_block(void*, void*);
 
@@ -1091,6 +1119,15 @@ void Tracer::replace_rip_instruction() {
 
 
 void Tracer::abort() {
-  red_printf("\n--ABORT--\n");
+  {
+    red_printf("\n--ABORT--\n");
+    did_abort = true;
+    is_traced = false;
+    // write a resume block here in case that we want to retry this trace
+    // then we don't have to redo it from scratch
+    SimpleCompiler compiler(buffer.get());
+    auto r_cb = compiler.MakeResumeTraceBlock(current_location);
+    compiler.jmp(asmjit::imm_ptr(r_cb.getRawBuffer()));
+  }
   continue_program(current_location);
 }
