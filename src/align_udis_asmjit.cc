@@ -1,8 +1,5 @@
 #include "align_udis_asmjit.h"
 
-#include <iostream>
-using namespace std;
-
 using namespace redmagic;
 using namespace asmjit;
 
@@ -229,6 +226,7 @@ void AlignedInstructions::ReplaceReigster(int from, int to) {
 
   assert(did_replace);
 }
+
 
 void AlignedInstructions::Emit(asmjit::Assembler *assem) {
   enum X86InstId inst = get_asm_mnem();

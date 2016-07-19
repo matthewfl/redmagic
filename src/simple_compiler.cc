@@ -213,10 +213,14 @@ CodeBuffer SimpleCompiler::TestMemoryLocation(mem_loc_t resume_pc, mem_loc_t whe
   return resume_cb;
 }
 
-void SimpleCompiler::TestOperand(mem_loc_t resume_pc, const asmjit::Operand& opr, register_t val) {
+CodeBuffer SimpleCompiler::TestOperand(mem_loc_t resume_pc, const asmjit::Operand& opr, register_t val) {
   Label failure = newLabel();
-  auto scr = get_scratch_register();
-  auto scr2 = get_scratch_register();
+  asmjit::X86GpReg scr, scr2;
+  scr = get_scratch_register();
+  if(val > 0x7fffffff)
+    scr2 = get_scratch_register();
+
+  assert(opr.getSize() <= 4);
 
   SimpleCompiler resume_block(buffer);
   resume_block.clobbered_registers |= clobbered_registers;
@@ -229,13 +233,17 @@ void SimpleCompiler::TestOperand(mem_loc_t resume_pc, const asmjit::Operand& opr
   pushf();
   // mov(src, opr);
   emit(kX86InstIdMov, scr, opr);
-  mov(scr2, imm_u(val));
-  test(scr2, scr);
+  if(val > 0x7fffffff) {
+    mov(scr2, imm_u(val));
+    cmp(scr, scr2);
+  } else {
+    cmp(scr, imm_u(val));
+  }
+
   jne(failure);
   popf();
 
-  // not used yet
-  assert(0);
+  return resume_cb;
 }
 
 uint64_t* SimpleCompiler::MakeCounter() {

@@ -7,17 +7,24 @@ using namespace redmagic;
 using namespace std;
 
 namespace redmagic {
-  thread_local bool is_traced = false;
-  thread_local bool is_temp_disabled = false;
-  thread_local void *temp_disable_resume = nullptr;
+  //thread_local bool is_traced = false;
+  //thread_local bool is_temp_disabled = false;
+  thread_local void *temp_disable_last_addr = nullptr; // for debuggging
+  //thread_local void *temp_disable_resume = nullptr;
   //thread_local bool is_running_compiled = false;
+
+  thread_local bool protected_malloc = false;
 
   Manager *manager = nullptr;
 
-  thread_local Tracer* tracer = nullptr;
-  thread_local void* trace_id = nullptr;
+  //thread_local Tracer* tracer = nullptr;
+  //thread_local void* trace_id = nullptr;
 
-  thread_local vector<return_addr_info> trace_return_addr;
+  std::atomic<Tracer*> free_tracer_list;
+
+  thread_local tracer_stack_state *stack_head = nullptr;
+
+  thread_local vector<tracer_stack_state> threadl_tracer_stack;
 
   thread_local uint32_t this_thread_id = 0;
 }
@@ -45,12 +52,13 @@ extern "C" void* red_user_fellthrough_branch(void *id, void *ret_addr) {
 }
 
 extern "C" void* red_user_ensure_not_traced(void *_, void *ret_addr) {
-  assert(0);
+  // TODO:
+  //assert(!is_traced);
   return NULL;
 }
 
 extern "C" void* red_user_temp_disable(void *_, void *ret_addr) {
-  return manager->temp_disable();
+  return manager->temp_disable(ret_addr);
   //return NULL;
 }
 
@@ -63,9 +71,10 @@ extern "C" void* red_user_temp_enable(void *_, void *ret_addr) {
 extern "C" void *__real_malloc(size_t);
 
 extern "C" void redmagic_start() {
+  red_printf("Using redmagic jit by Matthew Francis-Landau <matthew@matthewfl.com>\n");
   if(manager != nullptr) {
-    perror("redmagic_start called twice");
-    ::exit(1);
+    red_printf("redmagic_start called twice");
+    abort();
   }
   //void *p = __real_malloc(sizeof(Manager) + 1024*12);
   //p = (void*)((((mem_loc_t)p) + 8*1024) & ~(0xfff));
@@ -118,6 +127,7 @@ Manager::Manager() {
   }
   dlclose(dlh);
 
+  get_tracer_head();
 }
 
 uint32_t Manager::get_thread_id() {
@@ -128,15 +138,20 @@ uint32_t Manager::get_thread_id() {
 }
 
 void* Manager::begin_trace(void *id, void *ret_addr) {
+  auto old_head = get_tracer_head();
 
   void *ret;
   Tracer *l;
   {
-    assert(tracer == nullptr);
+    assert(old_head->tracer == nullptr); // TODO: in the future allow for nesting tracers, since there might be an inner loop
+    auto new_head = push_tracer_stack();
+
+    //assert(tracer == nullptr);
     branch_info *info = &branches[id];
     assert(info->tracer == nullptr);
+
     auto buff = make_shared<CodeBuffer>(4 * 1024 * 1024);
-    l = tracer = new Tracer(buff);
+    new_head->tracer = l = new Tracer(buff);
     l->tracing_from = (mem_loc_t)ret_addr;
     l->owning_thread = get_thread_id();
     // int r = mprotect(this, 4*1024, PROT_READ | PROT_WRITE);
@@ -147,49 +162,60 @@ void* Manager::begin_trace(void *id, void *ret_addr) {
     // r = mprotect(this, 4*1024, PROT_NONE);
     // assert(!r);
 
-    trace_id = id;
+    new_head->trace_id = id;
     ret = l->Start(ret_addr);
-    is_traced = true;
+    new_head->is_traced = true;
     info->starting_point = l->get_loop_location();
   }
-
+  //return NULL;
   return ret;
 }
 
 void* Manager::end_trace(void *id) {
-  Tracer *l;
   void *ret;
-  {
-    branch_info *info = &branches[id];
-    assert(id == trace_id);
-    //if(tracer) {
-    //trace[id] = tracer;
-    assert(tracer == info->tracer);
-    l = tracer;
-    ret = l->EndTraceFallThrough();
-    trace_id = nullptr;
-    is_traced = false;
-    info->starting_point = l->get_loop_location();
-    l->tracing_from.store(0);
+  Tracer *l;
+  auto old_head = pop_tracer_stack();
+  auto head = get_tracer_head();
+  branch_info *info = &branches[id];
+  assert(old_head.trace_id == id);
+  assert(old_head.tracer == info->tracer);
+  l = old_head.tracer;
+  // ret is going to be the address of the normal execution
+  ret = l->EndTraceFallThrough();
+  if(head->resume_addr != nullptr) {
+    // if the next element contains a
+    ret = head->resume_addr;
+    head->resume_addr = nullptr;
   }
+  //trace_id = nullptr;
+  //is_traced = false;
+  l->tracing_from.store(0);
+
+  //return NULL;
   return ret;
 }
 
 void* Manager::jump_to_trace(void *id) {
   //void *addr = trace[id]->get_address();
   assert(0);
+  return NULL;
 }
 
 void* Manager::backwards_branch(void *id, void *ret_addr) {
-  if(is_traced) {
-    if(id == trace_id) {
-      return tracer->EndTraceLoop();
+  //return NULL;
+  auto head = get_tracer_head();
+  if(head->is_traced) {
+    if(id == head->trace_id) {
+      void *ret = head->tracer->EndTraceLoop();
+      pop_tracer_stack();
+      auto new_head = get_tracer_head();
+      assert(new_head->resume_addr == nullptr); // TODO: handle resuming previous tracer
+      return ret;
     } else {
       // then we should make a new tracer and jump to that
       return begin_trace(id, ret_addr);
     }
   } else {
-
     branch_info *info = &branches[id];
 
     if(info->tracer != nullptr) {
@@ -198,7 +224,9 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
       // TODO: make this use atomics
 
       // TODO: if this aborted, then need to make this have written the resume block at the bottom and
-      assert(!info->tracer->did_abort);
+      if(info->tracer->did_abort) {
+        red_printf("previous attempt aborted\n");
+      }
       return NULL;
     }
     // if the tracer is null then it either isn't being traced, hasn't started yet or has already finished
@@ -217,14 +245,19 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
 }
 
 void* Manager::fellthrough_branch(void *id) {
-  if(trace_id == id) {
-    if(is_traced) {
+  auto head = get_tracer_head();
+  if(head->trace_id == id) {
+    if(head->is_traced) {
       branch_info *info = &branches[id];
       void *ret;
-      Tracer *l = tracer;
+      Tracer *l = head->tracer;
       ret = l->EndTraceFallThrough();
-      is_traced = false;
-      trace_id = nullptr;
+      auto old_head = pop_tracer_stack();
+      auto new_head = get_tracer_head();
+      // TODO: handle how to resume the previous tracer?
+      assert(new_head->resume_addr == nullptr);
+      // is_traced = false;
+      // trace_id = nullptr;
       //info->starting_point = l->get_loop_location();
       info->tracer = nullptr;
       //l->tracing_from.store(0);
@@ -234,35 +267,76 @@ void* Manager::fellthrough_branch(void *id) {
   return NULL;
 }
 
-void* Manager::temp_disable() {
-  if(is_traced) {
-    return tracer->TempDisableTrace();
-  } else {
-    if(is_temp_disabled) {
-      ::perror("calling redmagic_temp_disable when the jit is already disabled");
-      ::exit(1);
-    }
-    is_temp_disabled = true;
+void* Manager::temp_disable(void *resume_pc) {
+  temp_disable_last_addr = resume_pc;
+  auto head = get_tracer_head();
+  assert(!head->is_temp_disabled);
+  head->is_temp_disabled = true;
+  void *ret = NULL;
+  if(head->is_traced) {
+    ret = head->tracer->TempDisableTrace();
   }
-  return NULL;
+  push_tracer_stack();
+  return ret;
 }
 
 void* Manager::temp_enable(void *resume_pc) {
-  void *r = temp_disable_resume;
-  if(r != nullptr) {
-    temp_disable_resume = nullptr;
-    if(is_traced) {
-      tracer->TempEnableTrace(resume_pc);
-    }
-    return r;
+  auto old_head = pop_tracer_stack();
+  assert(!old_head.is_traced);
+  auto head = get_tracer_head();
+  assert(head->is_temp_disabled);
+  head->is_temp_disabled = false;
+  void *ret = NULL;
+  if(head->is_traced) {
+    head->tracer->TempEnableTrace(resume_pc);
   }
-  assert(!is_traced);
-  if(!is_temp_disabled) {
-    ::perror("calling redmagic_temp_enable when jit is already enabled");
-    ::exit(1);
+  if(head->resume_addr != nullptr) {
+    ret = head->resume_addr;
+    head->resume_addr = nullptr;
   }
-  is_temp_disabled = false;
-  return NULL;
+  return ret;
+
+  // void *r = temp_disable_resume;
+  // if(r != nullptr) {
+  //   temp_disable_resume = nullptr;
+  //   if(is_traced) {
+  //     tracer->TempEnableTrace(resume_pc);
+  //   }
+  //   return r;
+  // }
+  // assert(!is_traced);
+  // if(!is_temp_disabled) {
+  //   red_printf("calling redmagic_temp_enable when jit is already enabled");
+  //   abort();
+  // }
+  // is_temp_disabled = false;
+  // return NULL;
+}
+
+uint32_t Manager::tracer_stack_size() {
+  return threadl_tracer_stack.size();
+}
+
+tracer_stack_state* Manager::push_tracer_stack() {
+  tracer_stack_state e;
+  threadl_tracer_stack.push_back(e);
+  return stack_head = &threadl_tracer_stack.back();
+}
+
+tracer_stack_state Manager::pop_tracer_stack() {
+  auto r = threadl_tracer_stack.back();
+  threadl_tracer_stack.pop_back();
+  stack_head = &threadl_tracer_stack.back();
+  return r;
+}
+
+tracer_stack_state *Manager::get_tracer_head() {
+  if(stack_head == nullptr) {
+    tracer_stack_state e;
+    threadl_tracer_stack.push_back(e);
+    stack_head = &threadl_tracer_stack[0];
+  }
+  return stack_head;
 }
 
 namespace {
@@ -271,7 +345,7 @@ namespace {
   struct _noname {
     _noname() {
       if(!dladdr((void*)&_nonamef, &self_dlinfo)) {
-        perror("failed to get dlinfo for self");
+        red_printf("failed to get dlinfo for self");
       }
     }
   } _noinst;

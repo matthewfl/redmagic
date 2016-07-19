@@ -48,7 +48,7 @@ namespace redmagic {
     CodeBuffer TestRegister(mem_loc_t resume_pc, int reg, register_t val);
     CodeBuffer TestMemoryLocation(mem_loc_t resume_pc, mem_loc_t where, register_t val);
 
-    void TestOperand(mem_loc_t resume_pc, const asmjit::Operand& opr, register_t val);
+    CodeBuffer TestOperand(mem_loc_t resume_pc, const asmjit::Operand& opr, register_t val);
 
     CodeBuffer MakeResumeTraceBlock(mem_loc_t resume_pc);
 

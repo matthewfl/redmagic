@@ -11,7 +11,7 @@
 // we can't direclty use allocators when we are tracing since it might screw with their internal states
 
 // use mmap and mprotect to wrap all alloc options
-//#define MPROTECTED_ALLOC
+#define MPROTECTED_ALLOC (40*1024)
 
 #define NBUFFERS 6
 
@@ -30,7 +30,7 @@ BUFFER_SIZES(MALLOC_BUFFERS);
 size_t largest_malloc = 0;
 
 namespace redmagic {
-  extern thread_local bool is_traced;
+  extern thread_local bool protected_malloc;
 }
 using namespace redmagic;
 
@@ -39,14 +39,21 @@ extern "C" void *__real_malloc(size_t size);
 extern "C" void *__wrap_malloc(size_t size) {
 
 #ifdef MPROTECTED_ALLOC
-  assert(size < 40*1024);
+  if(size < MPROTECTED_ALLOC)
+    size = MPROTECTED_ALLOC;
+  else {
+    size += 4*1024;
+    size &= ~(4*1024-1);
+  }
+  //assert(size < 40*1024);
   {
-    uint8_t *buffer = (uint8_t*)mmap(NULL, 40*1024 + 8*1024, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    uint8_t *buffer = (uint8_t*)mmap(NULL, size + 8*1024, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
     assert(buffer != MAP_FAILED);
+    *((size_t*)buffer) = size;
 
     int r = mprotect(buffer, 4*1024, PROT_NONE);
     assert(!r);
-    r = mprotect(buffer + 20*1024, 4*1024, PROT_NONE);
+    r = mprotect(buffer + 4*1024 + size, 4*1024, PROT_NONE);
     assert(!r);
 
     return buffer + 4*1024;
@@ -58,7 +65,7 @@ extern "C" void *__wrap_malloc(size_t size) {
   if(size > largest_malloc)
     largest_malloc = size;
 
-  if(!is_traced)
+  if(!protected_malloc)
     return __real_malloc(size);
 
 #define FIND_BUFFER(SIZE)                                   \
@@ -84,6 +91,9 @@ extern "C" void __real_free(void *ptr);
 
 extern "C" void __wrap_free(void *ptr) {
 #ifdef MPROTECTED_ALLOC
+  // assert that we aren't using this memory after we free it
+  int r = mprotect(ptr, MPROTECTED_ALLOC, PROT_NONE);
+  assert(!r);
   return;
 #endif
 
@@ -97,7 +107,7 @@ extern "C" void __wrap_free(void *ptr) {
 
   BUFFER_SIZES(FREE_BUFFER);
 
-  if(is_traced)
+  if(protected_malloc)
     printf("more wtf\n");
   __real_free(ptr);
 }
@@ -107,7 +117,7 @@ extern "C" void *__real_realloc(void *ptr, size_t size);
 
 extern "C" void *__wrap_realloc(void *ptr, size_t size) {
 #ifdef MPROTECTED_ALLOC
-  if(size < 40*1024)
+  if(size < MPROTECTED_ALLOC)
     return ptr;
   abort();
 #endif

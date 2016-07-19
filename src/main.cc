@@ -52,9 +52,9 @@ int main(int argc, char* argv[]) {
   while(1) {
     switch(program[pc]) {
     case PRINT_NUM:
-      redmagic_temp_disable();
+      //redmagic_temp_disable();
       cout << program[pc + 1] << endl;
-      redmagic_temp_enable();
+      //redmagic_temp_enable();
       //printf("%i\n", program[pc + 1]);
       pc += 2;
       break;

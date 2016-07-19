@@ -17,7 +17,7 @@ using namespace std;
 
 namespace redmagic {
   extern Manager *manager;
-  extern thread_local Tracer *tracer;
+  //extern thread_local Tracer *tracer;
 }
 
 
@@ -96,7 +96,7 @@ extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_addr
   void *ret = NULL;
   void *patch = NULL;
 
-  Tracer *l = tracer;
+  //Tracer *l = tracer;
   mem_loc_t desired = 0;
   if(!l->tracing_from.compare_exchange_strong(desired, target_rip)) {
     // we were not able to aquire the tracer for this thread, so create a new one
@@ -127,12 +127,15 @@ extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_addr
   //return ret;
 }
 namespace redmagic {
-  extern thread_local void *temp_disable_resume;
+  //extern thread_local void *temp_disable_resume;
 }
 
 extern "C" void red_set_temp_resume(void *resume_addr) {
-  assert(temp_disable_resume == nullptr);
-  temp_disable_resume = resume_addr;
+  auto head = manager->get_tracer_head();
+  assert(head->resume_addr == nullptr);
+  head->resume_addr = resume_addr;
+  head->is_temp_disabled = true;
+  //temp_disable_resume = resume_addr;
 }
 
 extern "C" void* red_end_trace(mem_loc_t normal_end_address) {
@@ -161,6 +164,8 @@ void* Tracer::Start(void *start_addr) {
   // stash the values of the register that we are about to override
   compiler.mov(x86::ptr(x86::rsp, static_cast<int32_t>(-TRACE_STACK_OFFSET - sizeof(struct user_regs_struct))), x86::rdx);
   compiler.mov(x86::ptr(x86::rsp, static_cast<int32_t>(-TRACE_STACK_OFFSET - sizeof(struct user_regs_struct) - sizeof(register_t))), x86::rsi);
+  compiler.mov(x86::ptr(x86::rsp, static_cast<int32_t>(-TRACE_STACK_OFFSET - sizeof(struct user_regs_struct) - 2*sizeof(register_t))), x86::rdi);
+
 
   compiler.mov(x86::rdx, imm_ptr(this)); // argument 3
   compiler.mov(x86::rsi, imm_ptr(&red_begin_tracing));
@@ -188,7 +193,7 @@ void* Tracer::Start(void *start_addr) {
 
 // abort after some number of instructions to see if there is an error with the first n instructions
 // useful for bisecting which instruction is failing if there is an error
-//#define ABORT_BEFORE 250
+//#define ABORT_BEFORE 5
 //56
 
 // break with 16 after 10 iterations
@@ -219,13 +224,17 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
 
   regs_struct->rdx = ((register_t*)(regs_struct + 1))[0];
   regs_struct->rsi = ((register_t*)(regs_struct + 1))[1];
+  regs_struct->rdi = ((register_t*)(regs_struct + 1))[2];
 
 
   current_location = udis_loc;
 
+
 #ifdef CONF_VERBOSE
   red_printf("----->start %i\n", ++loop_n);
 #endif
+
+  //abort();
 
   while(true) {
     assert(before_stack == 0xdeadbeef);
@@ -308,6 +317,7 @@ extern "C" void red_asm_end_trace();
 
 void* Tracer::EndTraceFallThrough() {
   assert(icount - last_call_instruction < 2);
+  red_printf("tracer end fallthrough\n");
   buffer->setOffset(last_call_generated_op);
   SimpleCompiler compiler(buffer.get());
   compiler.mov(asmjit::x86::rdi, asmjit::imm_u(last_call_ret_addr));
@@ -321,6 +331,7 @@ void* Tracer::EndTraceLoop() {
   // assert that we recently performed a call
   // this should be to ourselves to end the trace
   assert(icount - last_call_instruction < 2);
+  red_printf("tracer end loop back\n");
   buffer->setOffset(last_call_generated_op);
   SimpleCompiler compiler(buffer.get());
   compiler.jmp(asmjit::imm_ptr(loop_start_location));
@@ -342,9 +353,8 @@ void *Tracer::TempDisableTrace() {
   auto written = compiler.finalize();
   write_interrupt_block();
 
-  temp_disable_resume = (void*)(written.getRawBuffer() + written.getOffset());
-
-
+  //temp_disable_resume = (void*)(written.getRawBuffer() + written.getOffset());
+  red_set_temp_resume((void*)(written.getRawBuffer() + written.getOffset()));
 
   return (void*)last_call_ret_addr;
 }
@@ -462,8 +472,9 @@ Tracer::opr_value Tracer::get_opr_value(const ud_operand_t *opr) {
   }
   case UD_OP_MEM: {
     int ri = ud_register_to_sys(opr->base);
-    assert(ri != -1);
-    register_t rv = ((register_t*)regs_struct)[ri];
+    register_t rv = 0;
+    if(ri != -1)
+      rv = ((register_t*)regs_struct)[ri];
     if(opr->index != UD_NONE) {
       int ii = ud_register_to_sys(opr->index);
       register_t iv = ((register_t*)regs_struct)[ii];
@@ -865,15 +876,30 @@ void Tracer::evaluate_instruction() {
         jump_dest = t;
       } else {
         SimpleCompiler compiler(buffer.get());
-        assert(opr->index == UD_NONE);
-        int i = ud_register_to_sys(opr->base);
+        AlignedInstructions ali(&disassm);
         auto v = get_opr_value(opr);
-        register_t rv = ((register_t*)(regs_struct))[i];
-        auto r_cb = compiler.TestRegister(ud_insn_off(&disassm), i, rv);
+        compiler.add_used_registers(ali.registers_used());
+        jump_dest = v.is_ptr ? *v.address_ptr : v.address;
+        auto r_cb = compiler.TestOperand(ud_insn_off(&disassm), ali.get_asm_op(0), jump_dest);
         auto written = compiler.finalize();
         r_cb.replace_stump<uint64_t>(0xfafafafafafafafa, written.getRawBuffer());
 
-        jump_dest = *(mem_loc_t*)v.address;
+
+
+
+        // if(opr->index == UD_NONE) {
+        //   int i = ud_register_to_sys(opr->base);
+        //   auto v = get_opr_value(opr);
+        //   register_t rv = ((register_t*)(regs_struct))[i];
+        //   auto r_cb = compiler.TestRegister(ud_insn_off(&disassm), i, rv);
+        //   auto written = compiler.finalize();
+        //   r_cb.replace_stump<uint64_t>(0xfafafafafafafafa, written.getRawBuffer());
+
+        //   jump_dest = *(mem_loc_t*)v.address;
+        // } else {
+        //   auto v = get_opr_value(opr);
+        //   compiler.TestOperand(ud_insn_off(&disassm), ali.get_asm_op(0),
+        // }
       }
     }
     else {
@@ -936,17 +962,39 @@ void Tracer::evaluate_instruction() {
         }
       }
     } else {
-      // vtable branching
+
       // TODO: check that the register is pointing at the same location in memory
-      opr_value ta = get_opr_value(opr1);
-      assert(ta.is_ptr);
-      mem_loc_t value = *ta.address_ptr;
       SimpleCompiler compiler(buffer.get());
-      //compiler.TestRegister(
-      auto r_cb = compiler.TestMemoryLocation(ud_insn_off(&disassm), ta.address, value);
+      AlignedInstructions ali(&disassm);
+      auto v = get_opr_value(opr1);
+      compiler.add_used_registers(ali.registers_used());
+      call_pc = v.is_ptr ? *v.address_ptr : v.address;
+      auto r_cb = compiler.TestOperand(ud_insn_off(&disassm), ali.get_asm_op(0), call_pc);
       auto written = compiler.finalize();
       r_cb.replace_stump<uint64_t>(0xfafafafafafafafa, written.getRawBuffer());
-      call_pc = value;
+
+
+      // opr_value ta = get_opr_value(opr1);
+      // assert(0);
+      // if(ta.is_ptr) {
+      //   // vtable branching
+      //   mem_loc_t value = *ta.address_ptr;
+      //   SimpleCompiler compiler(buffer.get());
+      //   //compiler.TestRegister(
+      //   auto r_cb = compiler.TestMemoryLocation(ud_insn_off(&disassm), ta.address, value);
+      //   auto written = compiler.finalize();
+      //   r_cb.replace_stump<uint64_t>(0xfafafafafafafafa, written.getRawBuffer());
+      //   call_pc = value;
+      // } else {
+      //   assert(!ta.is_ptr);
+      //   // then we are branching to the address stored in the register
+      //   assert(opr1->index == UD_NONE);
+      //   SimpleCompiler compiler(buffer.get());
+      //   auto r_cb = compiler.TestRegister(ud_insn_off(&disassm), ud_register_to_sys(opr1->base), ta.value);
+      //   auto written = compiler.finalize();
+      //   r_cb.replace_stump<uint64_t>(0xfafafafafafafafa, written.getRawBuffer());
+      //   call_pc = ta.value;
+      // }
     }
 
     assert(call_pc != 0);
@@ -1080,7 +1128,9 @@ void Tracer::replace_rip_instruction() {
 
     //case UD_Ipush: // have to do push independently since the stack is moving
   case UD_Iadd:
+  case UD_Isub:
   case UD_Icmp:
+  case UD_Ixor:
   _auto_rewrite_register:
     {
       // automatically rewrite the registers that are being used
@@ -1108,8 +1158,9 @@ void Tracer::replace_rip_instruction() {
     assert(0);
   }
   default: {
-    AlignedInstructions ali(&disassm);
-
+    //AlignedInstructions ali(&disassm);
+    // TODO: currently using a whitelist of instructions to check what is fine, but would be better if there was a black list?
+    // if there was a blacklist what instructions should go on it?
 
 
     assert(0);
@@ -1122,12 +1173,14 @@ void Tracer::abort() {
   {
     red_printf("\n--ABORT--\n");
     did_abort = true;
-    is_traced = false;
-    // write a resume block here in case that we want to retry this trace
-    // then we don't have to redo it from scratch
-    SimpleCompiler compiler(buffer.get());
-    auto r_cb = compiler.MakeResumeTraceBlock(current_location);
-    compiler.jmp(asmjit::imm_ptr(r_cb.getRawBuffer()));
+    manager->get_tracer_head()->is_traced = false;
+    //is_traced = false;
+
+    // // write a resume block here in case that we want to retry this trace
+    // // then we don't have to redo it from scratch
+    // SimpleCompiler compiler(buffer.get());
+    // auto r_cb = compiler.MakeResumeTraceBlock(current_location);
+    // compiler.jmp(asmjit::imm_ptr(r_cb.getRawBuffer()));
   }
   continue_program(current_location);
 }

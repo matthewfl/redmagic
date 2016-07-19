@@ -44,7 +44,7 @@ namespace redmagic {
   typedef decltype(((struct user_regs_struct*)(NULL))->r15) register_t;
   typedef uint64_t mem_loc_t; // a memory location in the debugged program
 
-  uint32_t get_thread_id();
+  struct tracer_stack_state;
 
   class Manager {
   public:
@@ -59,10 +59,15 @@ namespace redmagic {
 
     void ensure_not_traced();
 
-    void *temp_disable();
+    void *temp_disable(void *resume_pc);
     void *temp_enable(void *resume_pc);
 
     uint32_t get_thread_id();
+
+    tracer_stack_state* push_tracer_stack();
+    tracer_stack_state pop_tracer_stack();
+    uint32_t tracer_stack_size();
+    tracer_stack_state* get_tracer_head();
 
   private:
     bool should_trace_method(void *ptr);
@@ -79,6 +84,7 @@ namespace redmagic {
     // std::map<void*, Tracer*> trace;
     std::unordered_map<void*, branch_info> branches;
     std::unordered_set<void*> no_trace_methods;
+    // std::unordered_map<uint32_t, std::vector<tracer_stack_state>*> thread_state_
 
     std::atomic<uint32_t> thread_id_counter;
 
@@ -88,16 +94,21 @@ namespace redmagic {
     friend class Tracer;
   };
 
-  struct return_addr_info {
-    Tracer *tracer;
-    void *addr;
-    void *trace_id;
+  // if we have nested tracers eg an outer loop calls an inner loop
+  // or if we have an outter tracer disabled and an inner tracer running still
+  //
+  struct tracer_stack_state {
+    Tracer *tracer = nullptr;
+    void *resume_addr = nullptr;
+    void *trace_id = nullptr;
+    bool is_temp_disabled = false;
+    bool is_traced = false;
   };
 
-  extern thread_local std::vector<return_addr_info> trace_return_addr;
-  extern thread_local Tracer *tracer; // current running tracer
-  extern thread_local void *trace_id; // id of current executing trace
-  extern thread_local bool is_traced;
+  //extern thread_local std::vector<tracer_stack_state> trace_return_addr;
+  //extern thread_local Tracer *tracer; // current running tracer
+  //extern thread_local void *trace_id; // id of current executing trace
+  //extern thread_local bool is_traced;
   extern Manager *manager;
 
 
