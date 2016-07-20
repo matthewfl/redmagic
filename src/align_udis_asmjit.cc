@@ -145,20 +145,39 @@ const asmjit::Operand AlignedInstructions::get_asm_op(unsigned int i) {
   case UD_OP_REG:
     return get_asm_register_from_rinfo(info->register_i);
   case UD_OP_MEM: {
-    assert(info->base_register.index != -1);
-    if(info->index_register.index == -1) {
-      return x86::word_ptr(get_asm_register_from_rinfo(info->base_register), info->offset);
+    if(info->base_register.index != -1) {
+      if(info->index_register.index == -1) {
+        return x86::word_ptr(get_asm_register_from_rinfo(info->base_register), info->offset);
+      }
+      int scale = 0;
+
+      switch(info->index_scale) {
+      case  0: scale = 0; break;
+      case  2: scale = 1; break;
+      case  4: scale = 2; break;
+      case  8: scale = 3; break;
+      case 16: scale = 4; break;
+      case 32: scale = 5; break;
+      case 64: scale = 6; break;
+      default: assert(0);
+      }
+      return x86::word_ptr(get_asm_register_from_rinfo(info->base_register), get_asm_register_from_rinfo(info->index_register), scale, info->offset);
+    } else {
+      // there is no base register
+      assert(info->index_register.index != -1);
+      int scale = 0;
+      switch(info->index_scale) {
+      case  0: scale = 0; break;
+      case  2: scale = 1; break;
+      case  4: scale = 2; break;
+      case  8: scale = 3; break;
+      case 16: scale = 4; break;
+      case 32: scale = 5; break;
+      case 64: scale = 6; break;
+      default: assert(0);
+      }
+      return x86::ptr_abs(0, get_asm_register_from_rinfo(info->index_register), scale, info->offset);
     }
-    int scale = 0;
-    switch(info->index_scale) {
-    case  0: scale = 0; break;
-    case  8: scale = 1; break;
-    case 16: scale = 2; break;
-    case 32: scale = 3; break;
-    case 64: scale = 4; break;
-    default: assert(0);
-    }
-    return x86::word_ptr(get_asm_register_from_rinfo(info->base_register), get_asm_register_from_rinfo(info->index_register), scale, info->offset);
   }
   default:
     assert(0);
