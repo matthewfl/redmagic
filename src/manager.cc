@@ -96,6 +96,7 @@ static const char *avoid_inlining_methods[] = {
 
   // we don't want to inline ourselves
   // so record the entry functions
+  // TODO: don't have to use dladdr to resolve this since they are in the same binary
   "redmagic_force_begin_trace",
   "redmagic_force_end_trace",
   "redmagic_force_jump_to_trace",
@@ -144,6 +145,11 @@ void* Manager::begin_trace(void *id, void *ret_addr) {
   Tracer *l;
   {
     assert(old_head->tracer == nullptr); // TODO: in the future allow for nesting tracers, since there might be an inner loop
+    if(old_head->tracer) {
+      assert(old_head->resume_addr == nullptr);
+      old_head->tracer->JumpToNestedLoop(id);
+      assert(old_head->resume_addr != nullptr);
+    }
     auto new_head = push_tracer_stack();
 
     //assert(tracer == nullptr);
@@ -165,7 +171,7 @@ void* Manager::begin_trace(void *id, void *ret_addr) {
     new_head->trace_id = id;
     ret = l->Start(ret_addr);
     new_head->is_traced = true;
-    info->starting_point = l->get_loop_location();
+    info->starting_point = l->get_start_location();
   }
   //return NULL;
   return ret;
@@ -206,10 +212,22 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
   auto head = get_tracer_head();
   if(head->is_traced) {
     if(id == head->trace_id) {
+      assert(!head->is_compiled);
       void *ret = head->tracer->EndTraceLoop();
-      pop_tracer_stack();
-      auto new_head = get_tracer_head();
-      assert(new_head->resume_addr == nullptr); // TODO: handle resuming previous tracer
+      head->is_compiled = true;
+      Tracer *l = head->tracer;
+      head->tracer = nullptr;
+
+      Tracer *expected = nullptr;
+      if(!free_tracer_list.compare_exchange_strong(expected, l)) {
+        // failled to save the tracer to the free list head
+        delete l;
+      }
+
+      // We are continuing the loop so there is no need to check the parent stack frame
+      //pop_tracer_stack();
+      //auto new_head = get_tracer_head();
+      //assert(new_head->resume_addr == nullptr); // TODO: handle resuming previous tracer
       return ret;
     } else {
       // then we should make a new tracer and jump to that
@@ -232,6 +250,10 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
     // if the tracer is null then it either isn't being traced, hasn't started yet or has already finished
     if(info->starting_point != nullptr) {
       // with tracer == null and starting not null then we have already finished this trace so jump to it
+      auto head = push_tracer_stack();
+      head->is_compiled = true;
+      head->is_traced = true;
+      head->trace_id = id;
       return info->starting_point;
     }
     // don't care about atomic since we are just trying to get an estimate, so if we lose some counts it is fine
@@ -246,23 +268,21 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
 
 void* Manager::fellthrough_branch(void *id) {
   auto head = get_tracer_head();
-  if(head->trace_id == id) {
-    if(head->is_traced) {
-      branch_info *info = &branches[id];
-      void *ret;
-      Tracer *l = head->tracer;
-      ret = l->EndTraceFallThrough();
-      auto old_head = pop_tracer_stack();
-      auto new_head = get_tracer_head();
-      // TODO: handle how to resume the previous tracer?
-      assert(new_head->resume_addr == nullptr);
-      // is_traced = false;
-      // trace_id = nullptr;
-      //info->starting_point = l->get_loop_location();
-      info->tracer = nullptr;
-      //l->tracing_from.store(0);
-      return ret;
-    }
+  if(head->trace_id == id && head->is_traced) {
+    branch_info *info = &branches[id];
+    void *ret;
+    Tracer *l = head->tracer;
+    ret = l->EndTraceFallThrough();
+    auto old_head = pop_tracer_stack();
+    auto new_head = get_tracer_head();
+    // TODO: handle how to resume the previous tracer?
+    assert(new_head->resume_addr == nullptr);
+    // is_traced = false;
+    // trace_id = nullptr;
+    //info->starting_point = l->get_loop_location();
+    info->tracer = nullptr;
+    //l->tracing_from.store(0);
+    return ret;
   }
   return NULL;
 }

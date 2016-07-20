@@ -30,11 +30,15 @@ namespace redmagic {
     // we are jumping back to the top of the loop, so do that
     void* EndTraceLoop();
 
+    // if there is another backwards branch inside of this backwards branch
+    // the there is a nested loop that we should trace
+    void JumpToNestedLoop(void *nested_trace_id);
+
     // generate a temp disable command, sets the thread local where to resume to address
     void* TempDisableTrace();
     void TempEnableTrace(void *resume_pc) { set_pc((uint64_t)resume_pc); }
 
-    inline void *get_loop_location() { return (void*)loop_start_location; }
+    inline void *get_start_location() { return (void*)trace_start_location; }
 
     inline mem_loc_t get_origional_pc() { return udis_loc; }
 
@@ -131,7 +135,8 @@ namespace redmagic {
     size_t last_call_generated_op; // where we have the corresponding gened ops (eg push ret addr)
     mem_loc_t last_call_ret_addr;
 
-    mem_loc_t loop_start_location;
+    mem_loc_t trace_start_location; // where this current trace begins
+    mem_loc_t loop_start_location; // where it should branch the loop back to
 
 
     // mem_loc_t stack;

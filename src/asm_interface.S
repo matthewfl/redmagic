@@ -86,9 +86,10 @@ red_asm_end_trace:
   jmp *%rax
 
 
-testing:
-  movl $0xfafafafa, -10(%rsp)
-
+  .global red_asm_start_nested_trace
+red_asm_start_nested_trace:
+  call red_branch_to_sub_trace@plt
+  jmp *%rax
 
 
 // we don't need executable stack

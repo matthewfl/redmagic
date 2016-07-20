@@ -18,6 +18,8 @@ using namespace std;
 namespace redmagic {
   extern Manager *manager;
   //extern thread_local Tracer *tracer;
+
+  extern std::atomic<Tracer*> free_tracer_list;
 }
 
 
@@ -75,9 +77,6 @@ Tracer::~Tracer() {
 
 
 void red_begin_tracing(struct user_regs_struct *other_stack, void* __, Tracer* tracer) {
-
-
-
   //tracer->regs_struct = other_stack;
   tracer->Run(other_stack);
 
@@ -96,18 +95,28 @@ extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_addr
   void *ret = NULL;
   void *patch = NULL;
 
-  //Tracer *l = tracer;
-  mem_loc_t desired = 0;
-  if(!l->tracing_from.compare_exchange_strong(desired, target_rip)) {
-    // we were not able to aquire the tracer for this thread, so create a new one
-    l = tracer = new Tracer(make_shared<CodeBuffer>(4 * 1024 * 1024));
-    // need to init the stack but must stash all registers...
+  auto head = manager->get_tracer_head();
+
+  // remove the free tracer
+  // TODO: make this into an actual linked list so that we can keep these tracers around and reuse?
+  // TODO: GC the tracers then
+  Tracer *l = free_tracer_list.exchange(nullptr);
+  if(l == nullptr) {
+    // we did not get a tracer, there must not have been one
+    // TODO: allocate a new tracer
     assert(0);
   }
+  mem_loc_t old_tracing_from = l->tracing_from.exchange(target_rip);
+  assert(old_tracing_from == 0);
+
+  assert(head->tracer == nullptr);
+  head->tracer = l;
+
+  l->owning_thread = manager->get_thread_id();
 
   // calling Start will invalidate the stack
   ret = l->Start((void*)target_rip);
-  patch = l->get_loop_location();
+  patch = l->get_start_location();
 
 
   // TODO: need to patch in the address only after the trace is done
@@ -139,9 +148,30 @@ extern "C" void red_set_temp_resume(void *resume_addr) {
 }
 
 extern "C" void* red_end_trace(mem_loc_t normal_end_address) {
-
-
+  // return the address that we want to jump to
+  // TODO: check the trace stack
+  auto head = manager->pop_tracer_stack();
+  auto new_head = manager->get_tracer_head();
+  assert(head.is_traced);
+  assert(!new_head->is_traced); // TODO: resuming a previously interrupted trace
   return (void*)normal_end_address;
+}
+
+extern "C" void* red_branch_to_sub_trace(void *resume_addr, void *sub_trace_id, void* target_rip) {
+  auto head = manager->get_tracer_head();
+  assert(head->is_traced);
+  assert(head->tracer == nullptr);
+  assert(head->resume_addr == nullptr);
+  head->resume_addr = resume_addr;
+  assert(sub_trace_id != head->trace_id);
+
+  Manager::branch_info *info = &manager->branches[sub_trace_id];
+  if(info->tracer != nullptr) {
+    assert(0);
+    // TODO: pop this element off the manager stack and abort the trace by jumping back to normal code
+  }
+  assert(info->starting_point != nullptr);
+  return info->starting_point;
 }
 
 extern "C" void red_asm_start_tracing(void*, void*, void*, void*);
@@ -185,7 +215,7 @@ void* Tracer::Start(void *start_addr) {
 
   auto written = compiler.finalize();
 
-  loop_start_location = buffer->getRawBuffer() + buffer->getOffset();
+  trace_start_location = buffer->getRawBuffer() + buffer->getOffset();
 
   return (void*)written.getRawBuffer();
   //return (void*)&red_begin_tracing;
@@ -234,7 +264,7 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
   red_printf("----->start %i\n", ++loop_n);
 #endif
 
-  //abort();
+  abort();
 
   while(true) {
     assert(before_stack == 0xdeadbeef);
@@ -332,14 +362,19 @@ void* Tracer::EndTraceLoop() {
   // this should be to ourselves to end the trace
   assert(icount - last_call_instruction < 2);
   red_printf("tracer end loop back\n");
+
+  auto head = manager->get_tracer_head();
+  mem_loc_t loop_location = (mem_loc_t)manager->branches[head->trace_id].starting_point;
+  assert(loop_location);
+
   buffer->setOffset(last_call_generated_op);
   SimpleCompiler compiler(buffer.get());
-  compiler.jmp(asmjit::imm_ptr(loop_start_location));
+  compiler.jmp(asmjit::imm_ptr(loop_location));
   tracing_from = 0;
-  return (void*)loop_start_location;
+  return (void*)loop_location;
 }
 
-void *Tracer::TempDisableTrace() {
+void* Tracer::TempDisableTrace() {
   assert(icount - last_call_instruction < 2);
   buffer->setOffset(last_call_generated_op);
   SimpleCompiler compiler(buffer.get());
@@ -357,6 +392,27 @@ void *Tracer::TempDisableTrace() {
   red_set_temp_resume((void*)(written.getRawBuffer() + written.getOffset()));
 
   return (void*)last_call_ret_addr;
+}
+
+extern "C" void red_asm_start_nested_trace();
+
+void Tracer::JumpToNestedLoop(void *nested_trace_id) {
+  // there should have been a backwards branch instruction that we are going to replace
+  assert(icount - last_call_instruction < 2);
+  buffer->setOffset(last_call_generated_op);
+  SimpleCompiler compiler(buffer.get());
+  compiler.mov(asmjit::x86::rdi, asmjit::imm_u(0xfafafafafafafafa));
+  compiler.mov(asmjit::x86::rsi, asmjit::imm_ptr(nested_trace_id));
+  compiler.mov(asmjit::x86::rdx, asmjit::imm_u(last_call_ret_addr));
+  compiler.jmp(asmjit::imm_ptr(&red_asm_start_nested_trace));
+  auto written = compiler.finalize();
+  write_interrupt_block();
+
+  mem_loc_t resume_addr = written.getRawBuffer() + written.getOffset();
+
+  manager->get_tracer_head()->resume_addr = (void*)resume_addr;
+
+  written.replace_stump<uint64_t>(0xfafafafafafafafa, resume_addr);
 }
 
 extern "C" void* red_asm_resume_eval_block(void*, void*);

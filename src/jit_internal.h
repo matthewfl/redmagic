@@ -72,19 +72,16 @@ namespace redmagic {
   private:
     bool should_trace_method(void *ptr);
 
-  private:
+  public:
     struct branch_info {
       int count = 0;
       Tracer *tracer = nullptr;
       void *starting_point = nullptr;
     };
 
-
-    // std::map<void*, int> branch_count;
-    // std::map<void*, Tracer*> trace;
     std::unordered_map<void*, branch_info> branches;
+  private:
     std::unordered_set<void*> no_trace_methods;
-    // std::unordered_map<uint32_t, std::vector<tracer_stack_state>*> thread_state_
 
     std::atomic<uint32_t> thread_id_counter;
 
@@ -103,6 +100,7 @@ namespace redmagic {
     void *trace_id = nullptr;
     bool is_temp_disabled = false;
     bool is_traced = false;
+    bool is_compiled = false;
   };
 
   //extern thread_local std::vector<tracer_stack_state> trace_return_addr;
@@ -183,6 +181,30 @@ namespace redmagic {
         location++;
       }
       assert(did_replace == 1);
+    }
+
+    template<typename SizeT> SizeT* find_stump(SizeT from) {
+      SizeT *ret = nullptr;
+#ifndef NDEBUG
+      uint8_t did_find = 0;
+#endif
+      SizeT current_value = 0;
+      size_t location = 0;
+      while(location < buffer_consumed) {
+        current_value <<= 8;
+        current_value |= readByte(location);
+        if(current_value == from) {
+          ret = (SizeT*)whereByte(location - sizeof(SizeT) + 1);
+#ifndef NDEBUG
+          did_find++;
+#else
+          break;
+#endif
+        }
+        location++;
+      }
+      assert(did_find == 1);
+      return ret;
     }
 
   public:
