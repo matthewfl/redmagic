@@ -10,7 +10,6 @@
 extern "C" {
 #endif
 
-
 // to be call as at the start of main
 void redmagic_start(void);
 
@@ -35,7 +34,6 @@ void redmagic_ensure_not_traced(void);
 // must have an accompany enable call for every disable otherwise the internal state may go wrong...
 void redmagic_temp_disable(void);
 void redmagic_temp_enable(void);
-
 
 #ifdef __cplusplus
 }

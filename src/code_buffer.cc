@@ -1,8 +1,7 @@
-#include "compiler.h"
+#include "jit_internal.h"
 
 #include <sys/mman.h>
 
-#include <iostream>
 using namespace std;
 
 using namespace redmagic;
@@ -15,16 +14,14 @@ CodeBuffer::CodeBuffer(size_t size):
   can_write_buffer(true),
   buffer_consumed(0)
 {
-  buffer = (uint8_t*)mmap((void*)&red_asm_compile_buff_near, size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANON, -1, 0);
+
+  buffer = (uint8_t*)mmap((void*)&red_asm_compile_buff_near,
+    size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANON, -1, 0);
 
   if(buffer == MAP_FAILED) {
     perror("failed to mmap buffer");
   }
   memset(buffer, 0, size);
-#ifdef CONF_COMPILE_IN_PARENT
-  _tracer = NULL;
-#endif
-  init();
 }
 
 CodeBuffer::~CodeBuffer() {
@@ -35,82 +32,37 @@ CodeBuffer::~CodeBuffer() {
   }
 }
 
-CodeBuffer::CodeBuffer(mem_loc_t start, size_t size):
+CodeBuffer::CodeBuffer(mem_loc_t start, size_t size, bool override_can_write):
   buffer((uint8_t*)start),
   size(size),
   owns_buffer(false),
-  can_write_buffer(false),
+  can_write_buffer(override_can_write),
   buffer_consumed(size)
 {
-#ifdef CONF_COMPILE_IN_PARENT
-  _tracer = NULL;
-#endif
-  init();
-  processJumps();
 }
 
-#ifdef CONF_COMPILE_IN_PARENT
-CodeBuffer::CodeBuffer(Tracer *tracer, mem_loc_t start, size_t size):
-  buffer((uint8_t*)start),
-  size(size),
+CodeBuffer::CodeBuffer():
+  buffer(nullptr),
+  size(0),
   owns_buffer(false),
   can_write_buffer(false),
-  buffer_consumed(size)
-{
-  _tracer = tracer;
-  init();
-  processJumps();
-}
-#endif
+  buffer_consumed(0)
+{}
 
-#ifdef CONF_COMPILE_IN_PARENT
-uint8_t CodeBuffer::readByte(mem_loc_t offset) {
-  assert(offset < size);
-  if(_tracer) {
-    assert(!owns_buffer);
-    return _tracer->readByte(offset + (mem_loc_t)buffer);
-  } else {
-    return buffer[offset];
-  }
-}
-void CodeBuffer::writeByte(mem_loc_t offset, uint8_t val) {
-  assert(offset < size);
-  assert(can_write_buffer);
-  if(_tracer) {
-    _tracer->writeByte(offset + (mem_loc_t)buffer, val);
-  } else {
-    buffer[offset] = val;
-  }
-}
-#endif
-
-
-int CodeBuffer::udis_input_hook(ud_t *ud) {
-  CodeBuffer *cb = (CodeBuffer*)ud_get_user_opaque_data(ud);
-  return cb->readByte(cb->ud_offset++);
+CodeBuffer::CodeBuffer(CodeBuffer &&x) {
+  buffer = x.buffer;
+  trampolines_size = x.trampolines_size;
+  size = x.size;
+  buffer_consumed = x.buffer_consumed;
+  owns_buffer = x.owns_buffer;
+  x.owns_buffer = false;
+  can_write_buffer = x.can_write_buffer;
+  external_trampolines = x.external_trampolines;
+  external_trampolines_size = x.external_trampolines_size;
 }
 
-void CodeBuffer::init() {
-  ud_init(&disassm);
-  ud_set_user_opaque_data(&disassm, this);
-  ud_set_input_hook(&disassm, CodeBuffer::udis_input_hook);
-  ud_set_mode(&disassm, 64);
-  ud_set_vendor(&disassm, UD_VENDOR_INTEL);
-  ud_set_syntax(&disassm, UD_SYN_INTEL);
-  ud_offset = 0;
-  ud_set_pc(&disassm, (mem_loc_t)buffer);
-}
-
-void CodeBuffer::processJumps() {
-  for(auto jmp : find_jumps(&disassm, size)) {
-    rebind_jumps j;
-    j.origional_offset = j.buffer_offset = jmp - (uint64_t)buffer;
-    j.origional_buffer = this;
-    jumps.push_back(j);
-  }
-}
-
-void CodeBuffer::writeToEnd(CodeBuffer &other, long start, long end) {
+CodeBuffer CodeBuffer::writeToEnd(const CodeBuffer &other, long start, long end) {
+  assert(other.external_trampolines == nullptr); // we can't relocate this without understanding the code
   mem_loc_t position = 0;
   if(start > 0)
     position = start;
@@ -128,23 +80,70 @@ void CodeBuffer::writeToEnd(CodeBuffer &other, long start, long end) {
   while(position < endl) {
     writeByte(buffer_consumed++, other.readByte(position++));
   }
-  for(auto j : other.jumps) {
-    if(j.buffer_offset >= startl && j.buffer_offset < endl) {
-      struct rebind_jumps new_jmp = j;
-      new_jmp.buffer_offset = j.buffer_offset - startl + self_start;
-      jumps.push_back(new_jmp);
-    }
-  }
+
+  CodeBuffer ret((mem_loc_t)buffer + self_start, buffer_consumed - self_start);
+  ret.can_write_buffer = true;
+  return ret;
 }
 
+CodeBuffer CodeBuffer::writeToBottom(const CodeBuffer &other, long start, long end) {
+  assert(other.external_trampolines == nullptr); // we can't relocate this without understanding the code
+  assert(external_trampolines == nullptr || (external_trampolines >= buffer && external_trampolines <= buffer + size));
+  mem_loc_t position = 0;
+  if(start > 0)
+    position = start;
+  mem_loc_t startl = position;
+  mem_loc_t self_start = buffer_consumed;
+  assert(end < 0 || end < other.buffer_consumed);
+  mem_loc_t endl = end;
+  if(end < 0) {
+    endl = other.buffer_consumed;
+  }
+
+  assert(endl <= other.buffer_consumed);
+  assert(endl - position + buffer_consumed < size);
+
+  size_t gsize = startl - endl;
+  size_t target_position = size - trampolines_size - gsize;
+  trampolines_size += gsize;
+
+  while(position < endl) {
+    writeByte(target_position++, other.readByte(position++));
+  }
+
+  CodeBuffer ret((mem_loc_t)buffer + self_start, buffer_consumed - self_start);
+  ret.can_write_buffer = true;
+  return ret;
+
+}
+
+static int codebuff_input_hook(ud_t *ud) {
+  uint8_t **buff_location = (uint8_t**)ud_get_user_opaque_data(ud);
+
+  uint8_t r = **buff_location;
+  *buff_location++;
+  return r;
+}
+
+
 void CodeBuffer::print() {
-  ud_offset = 0;
+  ud_t disassm;
+  uint8_t *buff_location = buffer;
+  ud_init(&disassm);
+  ud_set_user_opaque_data(&disassm, &buff_location);
+  ud_set_input_hook(&disassm, &codebuff_input_hook);
+  ud_set_mode(&disassm, 64);
+  ud_set_vendor(&disassm, UD_VENDOR_INTEL);
+  ud_set_syntax(&disassm, UD_SYN_INTEL);
   ud_set_pc(&disassm, (mem_loc_t)buffer);
 
+  int icount = 0;
+
   while(ud_disassemble(&disassm)) {
-    cout << "[0x" << std::hex << ud_insn_off(&disassm) << std::dec << "] " << ud_insn_asm(&disassm) << "\t" << ud_insn_hex(&disassm) <<  endl;
-    if(ud_offset >= size)
+    printf("%8i\t%-35s [%#016lx] %s\n", ++icount, ud_insn_asm(&disassm), ud_insn_off(&disassm), ud_insn_hex(&disassm));
+
+    if(buff_location - buffer >= size)
       break;
   }
-  cout << flush;
+  fflush(stdout);
 }

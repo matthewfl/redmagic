@@ -2,7 +2,10 @@
 #define REDMAGIC_CONFIG_H_
 
 // used for debugging
-#define CONF_COMPILE_IN_PARENT
+//#define CONF_COMPILE_IN_PARENT
 
+#define CONF_NUMBER_OF_JUMPS_BEFORE_TRACE 10
+
+#define CONF_VERBOSE
 
 #endif // REDMAGIC_CONFIG_H_
