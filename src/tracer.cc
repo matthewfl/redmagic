@@ -254,9 +254,9 @@ bool Tracer::debug_check_abort() {
 void Tracer::Run(struct user_regs_struct *other_stack) {
   regs_struct = other_stack;
 
-  regs_struct->rdx = ((register_t*)(regs_struct + 1))[0];
-  regs_struct->rsi = ((register_t*)(regs_struct + 1))[1];
-  regs_struct->rdi = ((register_t*)(regs_struct + 1))[2];
+  regs_struct->rdx = ((register_t*)(regs_struct - 1))[0];
+  regs_struct->rsi = ((register_t*)(regs_struct - 1))[-1];
+  regs_struct->rdi = ((register_t*)(regs_struct - 1))[-2];
 
 
   current_location = udis_loc;

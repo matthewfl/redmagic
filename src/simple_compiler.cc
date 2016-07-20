@@ -325,7 +325,7 @@ void SimpleCompiler::ResumeBlockJump(mem_loc_t resume_pc) {
   auto label = newLabel();
   bind(label);
   mov(x86::ptr(x86::rsp, -TRACE_STACK_OFFSET + 216), x86::r10);
-  mov(x86::ptr(x86::rsp, -TRACE_STACK_SIZE + 224), x86::r9);
+  mov(x86::ptr(x86::rsp, -TRACE_STACK_OFFSET + 224), x86::r9);
   mov(x86::r10, imm_u(resume_pc));
   // TODO: have this load the address of the instruction that jumped here instead of just this block
   // this will allow for it to easily write in a direct jump, as being designed now, we will have to redirect the jump through this indirection
