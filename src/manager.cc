@@ -53,7 +53,7 @@ extern "C" void* red_user_fellthrough_branch(void *id, void *ret_addr) {
 
 extern "C" void* red_user_ensure_not_traced(void *_, void *ret_addr) {
   // TODO:
-  //assert(!is_traced);
+  assert(!manager->get_tracer_head()->is_traced);
   return NULL;
 }
 
@@ -144,11 +144,15 @@ void* Manager::begin_trace(void *id, void *ret_addr) {
   void *ret;
   Tracer *l;
   {
-    assert(old_head->tracer == nullptr); // TODO: in the future allow for nesting tracers, since there might be an inner loop
+    // assert(old_head->tracer == nullptr); // TODO: in the future allow for nesting tracers, since there might be an inner loop
     if(old_head->tracer) {
-      assert(old_head->resume_addr == nullptr);
-      old_head->tracer->JumpToNestedLoop(id);
-      assert(old_head->resume_addr != nullptr);
+      if(old_head->tracer->did_abort) {
+        red_printf("won't subtrace since there was an abort\n");
+      } else {
+        assert(old_head->resume_addr == nullptr);
+        old_head->tracer->JumpToNestedLoop(id);
+        assert(old_head->resume_addr != nullptr);
+      }
     }
     auto new_head = push_tracer_stack();
 
@@ -180,22 +184,31 @@ void* Manager::begin_trace(void *id, void *ret_addr) {
 void* Manager::end_trace(void *id) {
   void *ret;
   Tracer *l;
-  auto old_head = pop_tracer_stack();
   auto head = get_tracer_head();
   branch_info *info = &branches[id];
-  assert(old_head.trace_id == id);
-  assert(old_head.tracer == info->tracer);
-  l = old_head.tracer;
+  assert(head->trace_id == id);
+  assert(head->tracer == info->tracer);
+  l = head->tracer;
+  head->tracer = nullptr;
+
   // ret is going to be the address of the normal execution
   ret = l->EndTraceFallThrough();
-  if(head->resume_addr != nullptr) {
-    // if the next element contains a
-    ret = head->resume_addr;
-    head->resume_addr = nullptr;
-  }
+  // if(head->resume_addr != nullptr) {
+  //   // if the next element contains a
+  //   ret = head->resume_addr;
+  //   head->resume_addr = nullptr;
+  // }
   //trace_id = nullptr;
   //is_traced = false;
   l->tracing_from.store(0);
+
+
+  Tracer *expected = nullptr;
+  if(!free_tracer_list.compare_exchange_strong(expected, l)) {
+    // failled to save the tracer to the free list head
+    delete l;
+  }
+
 
   //return NULL;
   return ret;
@@ -269,20 +282,21 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
 void* Manager::fellthrough_branch(void *id) {
   auto head = get_tracer_head();
   if(head->trace_id == id && head->is_traced) {
-    branch_info *info = &branches[id];
-    void *ret;
-    Tracer *l = head->tracer;
-    ret = l->EndTraceFallThrough();
-    auto old_head = pop_tracer_stack();
-    auto new_head = get_tracer_head();
-    // TODO: handle how to resume the previous tracer?
-    assert(new_head->resume_addr == nullptr);
-    // is_traced = false;
-    // trace_id = nullptr;
-    //info->starting_point = l->get_loop_location();
-    info->tracer = nullptr;
-    //l->tracing_from.store(0);
-    return ret;
+    return end_trace(id);
+    // branch_info *info = &branches[id];
+    // void *ret;
+    // Tracer *l = head->tracer;
+    // ret = l->EndTraceFallThrough();
+    // auto old_head = pop_tracer_stack();
+    // auto new_head = get_tracer_head();
+    // // TODO: handle how to resume the previous tracer?
+    // assert(new_head->resume_addr == nullptr);
+    // // is_traced = false;
+    // // trace_id = nullptr;
+    // //info->starting_point = l->get_loop_location();
+    // info->tracer = nullptr;
+    // //l->tracing_from.store(0);
+    // return ret;
   }
   return NULL;
 }

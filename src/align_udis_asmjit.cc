@@ -94,15 +94,16 @@ AlignedInstructions::AlignedInstructions(ud_t *disassm) {
       }
       break;
     case UD_OP_REG: {
-      info->register_i = ud_register_to_sys(opr->base);
+      info->register_i = ud_register_to_rinfo(opr->base);
       break;
     }
     case UD_OP_MEM: {
-      info->base_register = info->index_register = info->index_scale = -1;
+      info->base_register = info->index_register = {-1};
+      info->index_scale = 0;
       if(opr->base != UD_NONE)
-        info->base_register = ud_register_to_sys(opr->base);
+        info->base_register = ud_register_to_rinfo(opr->base);
       if(opr->index != UD_NONE) {
-        info->index_register = ud_register_to_sys(opr->index);
+        info->index_register = ud_register_to_rinfo(opr->index);
         info->index_scale = opr->scale;
       }
       switch(opr->offset) {
@@ -142,11 +143,11 @@ const asmjit::Operand AlignedInstructions::get_asm_op(unsigned int i) {
   case UD_OP_JIMM:
     return imm_u(info->address);
   case UD_OP_REG:
-    return get_asm_register_from_sys(info->register_i);
+    return get_asm_register_from_rinfo(info->register_i);
   case UD_OP_MEM: {
-    assert(info->base_register != -1);
-    if(info->index_register == -1) {
-      return x86::word_ptr(get_asm_register_from_sys(info->base_register), info->offset);
+    assert(info->base_register.index != -1);
+    if(info->index_register.index == -1) {
+      return x86::word_ptr(get_asm_register_from_rinfo(info->base_register), info->offset);
     }
     int scale = 0;
     switch(info->index_scale) {
@@ -157,7 +158,7 @@ const asmjit::Operand AlignedInstructions::get_asm_op(unsigned int i) {
     case 64: scale = 4; break;
     default: assert(0);
     }
-    return x86::word_ptr(get_asm_register_from_sys(info->base_register), get_asm_register_from_sys(info->index_register), scale, info->offset);
+    return x86::word_ptr(get_asm_register_from_rinfo(info->base_register), get_asm_register_from_rinfo(info->index_register), scale, info->offset);
   }
   default:
     assert(0);
@@ -170,14 +171,14 @@ uint64_t AlignedInstructions::registers_used() {
     operand_info *info = &operands[i];
     switch(info->type) {
     case UD_OP_REG: {
-      ret |= 1 << info->register_i;
+      ret |= 1 << info->register_i.index;
       break;
     }
     case UD_OP_MEM: {
-      if(info->base_register != -1)
-        ret |= 1 << info->base_register;
-      if(info->index_register != -1)
-        ret |= 1 << info->index_register;
+      if(info->base_register.index != -1)
+        ret |= 1 << info->base_register.index;
+      if(info->index_register.index != -1)
+        ret |= 1 << info->index_register.index;
       break;
     }
     case UD_OP_CONST:
@@ -198,20 +199,20 @@ void AlignedInstructions::ReplaceReigster(int from, int to) {
     operand_info *info = &operands[i];
     switch(info->type) {
     case UD_OP_REG: {
-      if(info->register_i == from) {
+      if(info->register_i.index == from) {
         did_replace = true;
-        info->register_i = to;
+        info->register_i.index = to;
       }
       break;
     }
     case UD_OP_MEM: {
-      if(info->base_register == from) {
+      if(info->base_register.index == from) {
         did_replace = true;
-        info->base_register = to;
+        info->base_register.index = to;
       }
-      if(info->index_register == from) {
+      if(info->index_register.index == from) {
         did_replace = true;
-        info->index_register = to;
+        info->index_register.index = to;
       }
       break;
     }

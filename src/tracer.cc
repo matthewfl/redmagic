@@ -169,6 +169,8 @@ extern "C" void* red_branch_to_sub_trace(void *resume_addr, void *sub_trace_id, 
   if(info->tracer != nullptr) {
     assert(0);
     // TODO: pop this element off the manager stack and abort the trace by jumping back to normal code
+    // also check that the inner loop wasn't aborted?
+    // maybe treat this as a temp disabled inner loop
   }
   assert(info->starting_point != nullptr);
   return info->starting_point;
@@ -223,7 +225,7 @@ void* Tracer::Start(void *start_addr) {
 
 // abort after some number of instructions to see if there is an error with the first n instructions
 // useful for bisecting which instruction is failing if there is an error
-//#define ABORT_BEFORE 5
+//#define ABORT_BEFORE 50
 //56
 
 // break with 16 after 10 iterations
@@ -263,8 +265,6 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
 #ifdef CONF_VERBOSE
   red_printf("----->start %i\n", ++loop_n);
 #endif
-
-  abort();
 
   while(true) {
     assert(before_stack == 0xdeadbeef);
@@ -1126,6 +1126,8 @@ void Tracer::replace_rip_instruction() {
 
   enum ud_mnemonic_code mnem = ud_insn_mnemonic(&disassm);
 
+  AlignedInstructions ali(&disassm);
+
   switch(mnem) {
   case UD_Ilea: {
     const ud_operand_t *opr1 = ud_insn_opr(&disassm, 0); // dest address
@@ -1148,22 +1150,28 @@ void Tracer::replace_rip_instruction() {
     assert(0);
   }
 
-  case UD_Imov: {
+  case UD_Imov /*... UD_Imovzx*/: {
     const ud_operand_t *opr1 = ud_insn_opr(&disassm, 0); // dest address
     const ud_operand_t *opr2 = ud_insn_opr(&disassm, 1); // source address
     assert(opr1 != NULL && opr2 != NULL);
-    if(opr2->base == UD_R_RIP && opr2->index == UD_NONE) {
+    if(opr2->base == UD_R_RIP && opr2->index == UD_NONE && opr1->type == UD_OP_REG) {
       // // then we are just reading some offset from this address
       opr_value val = get_opr_value(opr2);
       assert(val.is_ptr);
-      assert(opr1->type == UD_OP_REG);
+      // assert(opr1->type == UD_OP_REG);
       int dest = ud_register_to_sys(opr1->base);
 
       SimpleCompiler compiler(buffer.get());
-      compiler.MemToRegister(val.address, dest);
+      auto r = compiler.get_register(dest);
+      compiler.mov(r, asmjit::imm_u(val.address));
+      // use the aligned instruction so that the correct size is read from memory
+      compiler.emit(asmjit::kX86InstIdMov, ali.get_asm_op(0), asmjit::x86::ptr(r));
+
       return;
     }
-    assert(0);
+    // we must be writing to memory instead of the register, which means that we can't use it as a scratch
+    // location to store the address, instead just use the auto rewriter
+    goto _auto_rewrite_register;
   }
 
   case UD_Ipush: {
@@ -1191,7 +1199,6 @@ void Tracer::replace_rip_instruction() {
     {
       // automatically rewrite the registers that are being used
       // and then use the compiler to generate the approperate bytes
-      AlignedInstructions ali(&disassm);
       uint64_t used_registers = ali.registers_used();
       assert((used_registers & (1 << RIP)) != 0);
       assert((used_registers & (1 << RSP)) == 0);

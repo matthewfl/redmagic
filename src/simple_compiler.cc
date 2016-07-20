@@ -220,7 +220,8 @@ CodeBuffer SimpleCompiler::TestOperand(mem_loc_t resume_pc, const asmjit::Operan
   if(val > 0x7fffffff)
     scr2 = get_scratch_register();
 
-  assert(opr.getSize() <= 4);
+  // TODO: manage of the opr is loaded depending on the size of it?
+  //assert(opr.getSize() <= 4);
 
   SimpleCompiler resume_block(buffer);
   resume_block.clobbered_registers |= clobbered_registers;
