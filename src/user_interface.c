@@ -1,5 +1,5 @@
 
-// useful for compiling against while not causing an "problems"
+// useful for compiling against while not causing any "problems"
 //#define DISABLE_REDMAGIC
 
 // this is define in a .c file instead of .s so that we can

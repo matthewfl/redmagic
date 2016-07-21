@@ -222,6 +222,7 @@ void* Tracer::Start(void *start_addr) {
 
   compiler.jmp(imm_u(interrupt_block_location));
   compiler.mov(x86::r15, imm_u(0xdeadbeef));
+  compiler.mov(x86::r15, imm_ptr(start_addr));
   //compiler.jmp(imm_ptr(start_addr));
 
   auto written = compiler.finalize();
@@ -280,6 +281,7 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
     assert(after_stack == 0xdeadbeef);
     generated_location = buffer->getRawBuffer() + buffer->getOffset();
     last_location = udis_loc;
+    local_jump_min_addr = last_local_jump = 0;
     assert(current_location == last_location);
     //assert(generation_lock.owns_lock());
 
@@ -301,8 +303,31 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
       //fflush(stderr);
 
       jmp_info = decode_instruction();
-      if(jmp_info.is_jump)
+      if(jmp_info.is_jump) {
+        if(jmp_info.is_local_jump) {
+          // there is a chance that we can directly inline this if this is a short loop
+          if(jmp_info.local_jump_offset < 0) {
+            if(last_location - current_location  > -jmp_info.local_jump_offset) {
+              // this is a backwards branch that is going an acceptable distance
+              continue;
+            }
+          } else {
+            // this is a forward branch
+            if(jmp_info.local_jump_offset > 512)
+              // this is too far forward, we are unlikely to actually be able to inline this, so just run it
+              goto run_instructions;
+            if(last_local_jump == 0) {
+              // this is the earliest instruction we are currently aware of so store its address
+              last_local_jump = ud_insn_off(&disassm);
+            }
+            if(udis_loc + jmp_info.local_jump_offset > local_jump_min_addr)
+              local_jump_min_addr = udis_loc + jmp_info.local_jump_offset;
+            continue;
+          }
+
+        }
         goto run_instructions;
+      }
 
       for(int i = 0;; i++) {
         const ud_operand_t *opr = ud_insn_opr(&disassm, i);
@@ -321,8 +346,22 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
         goto run_instructions;
 #endif
       last_location = udis_loc;
+      if(local_jump_min_addr && udis_loc > local_jump_min_addr) {
+        // yay, we are able to direclty inline this jump
+        local_jump_min_addr = last_local_jump = 0;
+      }
     }
   run_instructions:
+    if(local_jump_min_addr > last_location) {
+      // we failed to get far enough in the decoding to allow these jumps to be inlined
+      // so we revert back to the last "good" state
+      last_location = last_local_jump;
+      set_pc(last_local_jump);
+      ud_disassemble(&disassm);
+      last_local_jump = local_jump_min_addr = 0;
+      // these jumps can't reference registers so if that is what caused the break then set to false
+      rip_used = false;
+    }
     if(current_location != last_location) {
       {
         CodeBuffer ins_set(current_location, last_location - current_location);
@@ -357,7 +396,7 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
 
 extern "C" void red_asm_end_trace();
 
-void* Tracer::EndTraceFallThrough() {
+void* Tracer::EndTraceFallthrough() {
   assert(icount - last_call_instruction < 2);
   red_printf("tracer end fallthrough\n");
   buffer->setOffset(last_call_generated_op);
@@ -619,6 +658,13 @@ struct jump_instruction_info Tracer::decode_instruction() {
   struct jump_instruction_info ret;
 
   switch(ud_insn_mnemonic(&disassm)) {
+
+  case UD_Inop: {
+    // this is used to remove nop since they are no longer helpful with alignment since we are rewriting everything
+    ret.is_jump = true;
+    return ret;
+  }
+
   case UD_Ijo:
   case UD_Ijno:
   case UD_Ijb:
@@ -641,13 +687,13 @@ struct jump_instruction_info Tracer::decode_instruction() {
     ret.is_jump = true;
     switch(opr->size) {
     case 8:
-      ret.local_jump_location = opr->lval.sbyte;
+      ret.local_jump_offset = opr->lval.sbyte;
       break;
     case 16:
-      ret.local_jump_location = opr->lval.sword;
+      ret.local_jump_offset = opr->lval.sword;
       break;
     case 32:
-      ret.local_jump_location = opr->lval.sdword;
+      ret.local_jump_offset = opr->lval.sdword;
       break;
     default:
       assert(0);
@@ -663,13 +709,13 @@ struct jump_instruction_info Tracer::decode_instruction() {
     ret.is_jump = true;
     switch(opr->size) {
     case 8:
-      ret.local_jump_location = opr->lval.sbyte;
+      ret.local_jump_offset = opr->lval.sbyte;
       break;
     case 16:
-      ret.local_jump_location = opr->lval.sword;
+      ret.local_jump_offset = opr->lval.sword;
       break;
     case 32:
-      ret.local_jump_location = opr->lval.sdword;
+      ret.local_jump_offset = opr->lval.sdword;
       break;
     default:
       assert(0);
@@ -682,13 +728,13 @@ struct jump_instruction_info Tracer::decode_instruction() {
       ret.is_local_jump = true;
       switch(opr->size) {
       case 8:
-        ret.local_jump_location = opr->lval.sbyte;
+        ret.local_jump_offset = opr->lval.sbyte;
         break;
       case 16:
-        ret.local_jump_location = opr->lval.sword;
+        ret.local_jump_offset = opr->lval.sword;
         break;
       case 32:
-        ret.local_jump_location = opr->lval.sdword;
+        ret.local_jump_offset = opr->lval.sdword;
         break;
       default:
         assert(0);
@@ -712,6 +758,13 @@ struct jump_instruction_info Tracer::decode_instruction() {
   case UD_Iret:
   case UD_Iretf: {
     ret.is_jump = true;
+    return ret;
+  }
+
+  case UD_Iint3: {
+    // if we find an int3 then this means that there is some debugging statement and we don't want to trace that
+    red_printf("found int3 debugging statement, aborting");
+    abort();
     return ret;
   }
 
@@ -805,6 +858,12 @@ void Tracer::evaluate_instruction() {
   enum ud_mnemonic_code mnem = ud_insn_mnemonic(&disassm);
 
   switch(mnem) {
+
+  case UD_Inop: {
+    // does nothing
+    return;
+  }
+
   case UD_Ijo:
   case UD_Ijno:
   case UD_Ijb:
@@ -1269,7 +1328,6 @@ void Tracer::replace_rip_instruction() {
   case UD_Ixor:
   case UD_Idec:
   case UD_Iinc:
-
 
 
   case UD_Icmpxchg: // todo: don't want this here....

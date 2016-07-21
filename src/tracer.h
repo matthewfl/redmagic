@@ -9,7 +9,7 @@ namespace redmagic {
   struct jump_instruction_info {
     bool is_jump = false;
     bool is_local_jump = false;
-    int64_t local_jump_location = 0;
+    int64_t local_jump_offset = 0;
   };
 
   class Tracer {
@@ -26,13 +26,17 @@ namespace redmagic {
     void Run(struct user_regs_struct*);
 
     // we are done with the loop, so resume normal execution
-    void* EndTraceFallThrough();
+    void* EndTraceFallthrough();
+    // if this was a nested trace then we want to branch back to the main trace
+    //void *EndTraceFallthroughNestedLoop(void *target_addr);
     // we are jumping back to the top of the loop, so do that
     void* EndTraceLoop();
 
     // if there is another backwards branch inside of this backwards branch
     // the there is a nested loop that we should trace
     void JumpToNestedLoop(void *nested_trace_id);
+
+    void JumpFromNestedLoop(void *resume_pc) { set_pc((uint64_t)resume_pc); }
 
     // generate a temp disable command, sets the thread local where to resume to address
     void* TempDisableTrace();
@@ -144,6 +148,9 @@ namespace redmagic {
     struct jump_instruction_info jmp_info;
     bool rip_used = false;
     int64_t icount = 0;
+
+    mem_loc_t last_local_jump = 0;
+    mem_loc_t local_jump_min_addr = 0;
 
     mem_loc_t interrupt_block_location;
 

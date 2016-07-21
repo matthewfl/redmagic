@@ -174,6 +174,8 @@ void* Manager::begin_trace(void *id, void *ret_addr) {
 
   auto old_head = get_tracer_head();
 
+  void *trace_pc = ret_addr;
+
   void *ret;
   Tracer *l;
   {
@@ -184,6 +186,7 @@ void* Manager::begin_trace(void *id, void *ret_addr) {
       } else {
         assert(old_head->resume_addr == nullptr);
         old_head->tracer->JumpToNestedLoop(id);
+        trace_pc = (void*)old_head->tracer->get_origional_pc();
         assert(old_head->resume_addr != nullptr);
       }
     }
@@ -194,7 +197,7 @@ void* Manager::begin_trace(void *id, void *ret_addr) {
 
     auto buff = make_shared<CodeBuffer>(4 * 1024 * 1024);
     new_head->tracer = l = new Tracer(buff);
-    l->tracing_from = (mem_loc_t)ret_addr;
+    l->tracing_from = (mem_loc_t)trace_pc;
     l->owning_thread = get_thread_id();
     // int r = mprotect(this, 4*1024, PROT_READ | PROT_WRITE);
     // assert(!r);
@@ -205,7 +208,7 @@ void* Manager::begin_trace(void *id, void *ret_addr) {
     // assert(!r);
 
     new_head->trace_id = id;
-    ret = l->Start(ret_addr);
+    ret = l->Start(trace_pc);
     new_head->is_traced = true;
     info->starting_point = l->get_start_location();
   }
@@ -225,7 +228,7 @@ void* Manager::end_trace(void *id) {
   head->tracer = nullptr;
 
   // ret is going to be the address of the normal execution
-  ret = l->EndTraceFallThrough();
+  ret = l->EndTraceFallthrough();
   // if(head->resume_addr != nullptr) {
   //   // if the next element contains a
   //   ret = head->resume_addr;
@@ -419,6 +422,7 @@ tracer_stack_state Manager::pop_tracer_stack() {
 
 tracer_stack_state *Manager::get_tracer_head() {
   if(stack_head == nullptr) {
+    threadl_tracer_stack.reserve(50);
     tracer_stack_state e;
     threadl_tracer_stack.push_back(e);
     stack_head = &threadl_tracer_stack[0];
