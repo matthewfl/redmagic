@@ -1192,6 +1192,8 @@ void Tracer::replace_rip_instruction() {
   enum ud_mnemonic_code mnem = ud_insn_mnemonic(&disassm);
 
   AlignedInstructions ali(&disassm);
+  uint64_t used_registers = ali.registers_used();
+
 
   switch(mnem) {
   case UD_Ilea: {
@@ -1215,12 +1217,16 @@ void Tracer::replace_rip_instruction() {
     assert(0);
   }
 
-  case UD_Imov /*... UD_Imovzx*/: {
+
+    /*... UD_Imovzx:*/
+  case UD_Imov:
+  case UD_Imovsxd: {
     const ud_operand_t *opr1 = ud_insn_opr(&disassm, 0); // dest address
     const ud_operand_t *opr2 = ud_insn_opr(&disassm, 1); // source address
     assert(opr1 != NULL && opr2 != NULL);
-    if(opr2->base == UD_R_RIP && opr2->index == UD_NONE && opr1->type == UD_OP_REG) {
-      // // then we are just reading some offset from this address
+    if(opr2->base == UD_R_RIP && opr2->index == UD_NONE && opr1->type == UD_OP_REG && ali.get_op(0)->register_i.size == 64) {
+      // then we are just reading some offset from this address, which is constant
+      // also we have a register which we are about to clobber, so we can use it to store the address instead of allocating a new register
       opr_value val = get_opr_value(opr2);
       assert(val.is_ptr);
       // assert(opr1->type == UD_OP_REG);
@@ -1230,7 +1236,7 @@ void Tracer::replace_rip_instruction() {
       auto r = compiler.get_register(dest);
       compiler.mov(r, asmjit::imm_u(val.address));
       // use the aligned instruction so that the correct size is read from memory
-      compiler.emit(asmjit::kX86InstIdMov, ali.get_asm_op(0), asmjit::x86::ptr(r));
+      compiler.emit(ali.get_asm_mnem(), ali.get_asm_op(0), asmjit::x86::ptr(r));
 
       return;
     }
@@ -1259,12 +1265,19 @@ void Tracer::replace_rip_instruction() {
   case UD_Iadd:
   case UD_Isub:
   case UD_Icmp:
+  case UD_Itest:
   case UD_Ixor:
+  case UD_Idec:
+  case UD_Iinc:
+
+
+
+  case UD_Icmpxchg: // todo: don't want this here....
+
   _auto_rewrite_register:
     {
       // automatically rewrite the registers that are being used
       // and then use the compiler to generate the approperate bytes
-      uint64_t used_registers = ali.registers_used();
       assert((used_registers & (1 << RIP)) != 0);
       assert((used_registers & (1 << RSP)) == 0);
       used_registers &= ~(1 << RIP);

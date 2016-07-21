@@ -62,6 +62,8 @@ namespace redmagic {
     void *temp_disable(void *resume_pc);
     void *temp_enable(void *resume_pc);
 
+    void disable_branch(void *id);
+
     void* is_traced_call();
 
     void do_not_trace_method(void *addr);
@@ -83,6 +85,7 @@ namespace redmagic {
       int count = 0;
       Tracer *tracer = nullptr;
       void *starting_point = nullptr;
+      bool disabled = false;
     };
 
     std::unordered_map<void*, branch_info> branches;

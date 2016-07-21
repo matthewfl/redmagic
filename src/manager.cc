@@ -92,6 +92,10 @@ extern "C" void redmagic_do_not_trace_function(void *function_pointer) {
   manager->do_not_trace_method(function_pointer);
 }
 
+extern "C" void redmagic_disable_branch(void *id) {
+  manager->disable_branch(id);
+}
+
 static const char *avoid_inlining_methods[] = {
   // inlining the allocator doesn't really help since it will have a lot of branching
   // in trying to find where there is open memory
@@ -163,6 +167,11 @@ uint32_t Manager::get_thread_id() {
 }
 
 void* Manager::begin_trace(void *id, void *ret_addr) {
+
+  branch_info *info = &branches[id];
+  if(info->disabled)
+    return NULL; // do not trace this loop
+
   auto old_head = get_tracer_head();
 
   void *ret;
@@ -181,7 +190,6 @@ void* Manager::begin_trace(void *id, void *ret_addr) {
     auto new_head = push_tracer_stack();
 
     //assert(tracer == nullptr);
-    branch_info *info = &branches[id];
     assert(info->tracer == nullptr);
 
     auto buff = make_shared<CodeBuffer>(4 * 1024 * 1024);
@@ -210,6 +218,7 @@ void* Manager::end_trace(void *id) {
   Tracer *l;
   auto head = get_tracer_head();
   branch_info *info = &branches[id];
+  assert(!info->disabled);
   assert(head->trace_id == id);
   assert(head->tracer == info->tracer);
   l = head->tracer;
@@ -272,6 +281,11 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
     }
   } else {
     branch_info *info = &branches[id];
+
+    if(info->disabled) {
+      // this loop is disabled
+      return NULL;
+    }
 
     if(info->tracer != nullptr) {
       // there is already a tracer with some other thread running on this item
@@ -377,6 +391,13 @@ void* Manager::is_traced_call() {
     return head->tracer->ReplaceIsTracedCall();
   }
   return NULL;
+}
+
+void Manager::disable_branch(void *id) {
+  branches[id].disabled = true;
+  for(int i = 0; i < threadl_tracer_stack.size(); i++) {
+    assert(threadl_tracer_stack[i].trace_id != id);
+  }
 }
 
 uint32_t Manager::tracer_stack_size() {

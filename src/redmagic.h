@@ -35,9 +35,11 @@ void redmagic_ensure_not_traced(void);
 void redmagic_temp_disable(void);
 void redmagic_temp_enable(void);
 
-
 // for setup to tell the jit to not trace some function, eg the call into a gc or some custom malloc
 void redmagic_do_not_trace_function(void* function_pointer);
+
+// disable traceing on a specific branch, eg if there is some disallowed instruction such as yield contained in the branch
+void redmagic_disable_branch(void *);
 
 // return 0 if not traced, non zero otherwise
 unsigned long redmagic_is_traced(void);
