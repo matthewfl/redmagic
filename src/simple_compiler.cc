@@ -322,8 +322,11 @@ CodeBuffer SimpleCompiler::MakeResumeTraceBlock(mem_loc_t resume_pc) {
 
 void SimpleCompiler::ResumeBlockJump(mem_loc_t resume_pc) {
   restore_registers();
+  auto label_top = newLabel();
   auto label = newLabel();
   bind(label);
+  jmp(label_top); // this should be exactly 5 bytes long with the destination address being the last part
+  bind(label_top);
   mov(x86::ptr(x86::rsp, -TRACE_STACK_OFFSET + 216), x86::r10);
   mov(x86::ptr(x86::rsp, -TRACE_STACK_OFFSET + 224), x86::r9);
   mov(x86::r10, imm_u(resume_pc));
@@ -336,6 +339,24 @@ void SimpleCompiler::ResumeBlockJump(mem_loc_t resume_pc) {
 
   // for identifying which instruction it jumped from
   mov(x86::r9, imm_u(0xfafafafafafafafa));
+
+  // No one is going to generate code after this since we have already used a jump so there is no point
+  // we also know that this will be generated at the bottom since there is no point of generating at the top
+  // thus we use this information to ensure that the address of the jump is aligned to a 4byte boundary which means that it
+  // can be atomically updated (hopefully)
+
+  auto loffset = getLabelOffset(label_top);
+
+  mem_loc_t laddr = (mem_loc_t)(buffer->buffer + buffer->size - buffer->trampolines_size - getCodeSize() + loffset);
+
+  for(int i = laddr & 0x3; i; i--) {
+    nop();
+  }
+
+  mem_loc_t laddr2 = (mem_loc_t)(buffer->buffer + buffer->size - buffer->trampolines_size - getCodeSize() + loffset);
+
+  assert((laddr2 & 0x3) == 0);
+  //assert(0);
 }
 
 

@@ -90,10 +90,16 @@ extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_addr
   // the dummy address
   assert(write_jump_address != 0xfafafafafafafafa);
 
+  // that this is a jump with a rel32 term to the next line and is aligned properly
+  assert(*(uint8_t*)write_jump_address == 0xE9);
+  assert(*(int32_t*)(write_jump_address + 1) == 0);
+  assert(((write_jump_address + 1) & 0x3) == 0);
+
+
   assert(regs_struct->rsp - TRACE_STACK_OFFSET == (register_t)regs_struct);
 
   void *ret = NULL;
-  void *patch = NULL;
+  //void *patch = NULL;
 
   auto head = manager->get_tracer_head();
 
@@ -112,11 +118,14 @@ extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_addr
   assert(head->tracer == nullptr);
   head->tracer = l;
 
+  head->is_compiled = false;
+
   l->owning_thread = manager->get_thread_id();
 
   // calling Start will invalidate the stack
   ret = l->Start((void*)target_rip);
-  patch = l->get_start_location();
+  //patch = l->get_start_location();
+  l->set_where_to_patch((int32_t*)(write_jump_address + 1));
 
 
   // TODO: need to patch in the address only after the trace is done
@@ -274,6 +283,9 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
     assert(current_location == last_location);
     //assert(generation_lock.owns_lock());
 
+    // TODO: manage cases where the buffer runs out of space
+    assert(buffer->getFree() > 100 * 1024);
+
   processes_instructions:
     while(ud_disassemble(&disassm)) {
 
@@ -353,6 +365,7 @@ void* Tracer::EndTraceFallThrough() {
   compiler.mov(asmjit::x86::rdi, asmjit::imm_u(last_call_ret_addr));
   compiler.jmp(asmjit::imm_ptr(&red_asm_end_trace));
   auto w = compiler.finalize();
+  finish_patch();
   tracing_from = 0;
   return (void*)w.getRawBuffer();
 }
@@ -370,6 +383,7 @@ void* Tracer::EndTraceLoop() {
   buffer->setOffset(last_call_generated_op);
   SimpleCompiler compiler(buffer.get());
   compiler.jmp(asmjit::imm_ptr(loop_location));
+  finish_patch();
   tracing_from = 0;
   return (void*)loop_location;
 }
@@ -413,6 +427,28 @@ void Tracer::JumpToNestedLoop(void *nested_trace_id) {
   manager->get_tracer_head()->resume_addr = (void*)resume_addr;
 
   written.replace_stump<uint64_t>(0xfafafafafafafafa, resume_addr);
+}
+
+void* Tracer::ReplaceIsTracedCall() {
+  assert(icount - last_call_instruction < 2);
+  buffer->setOffset(last_call_generated_op);
+  SimpleCompiler compiler(buffer.get());
+  compiler.mov(asmjit::x86::rax, asmjit::imm(1));
+  auto written = compiler.finalize();
+  write_interrupt_block();
+
+  mem_loc_t resume_addr = written.getRawBuffer() + written.getOffset();
+
+  return (void*)resume_addr;
+}
+
+void Tracer::finish_patch() {
+  if(finish_patch_addr != nullptr) {
+    mem_loc_t irip = ((mem_loc_t)finish_patch_addr) + 4;
+    int32_t d = trace_start_location - irip;
+    *finish_patch_addr = d;
+    finish_patch_addr = nullptr;
+  }
 }
 
 extern "C" void* red_asm_resume_eval_block(void*, void*);
@@ -964,24 +1000,53 @@ void Tracer::evaluate_instruction() {
 
     process_jump_dest:
     assert(jump_dest != 0);
-    if(last_call_instruction + 1 == icount) {
-      // then the first operation in this method was a jump, which means that we were probably jumping through a redirect with the dynamic linker
-      if(!manager->should_trace_method((void*)jump_dest)) {
-        mem_loc_t cont_addr;
-        {
-          buffer->setOffset(last_call_generated_op);
-          pop_stack();
-          set_pc(last_call_ret_addr);
-          SimpleCompiler compiler(buffer.get());
-          compiler.call(asmjit::imm_ptr(jump_dest));
-          auto written = compiler.finalize();
-          write_interrupt_block();
-          cont_addr = written.getRawBuffer();
-        }
-        continue_program(cont_addr);
-        return;
+    if(!manager->should_trace_method((void*)jump_dest)) {
+      mem_loc_t cont_addr;
+      if(last_call_instruction + 1 == icount) {
+        // then the first operation in this method was a jump, which means that we were probably jumping through a redirect with the dynamic linker
+        buffer->setOffset(last_call_generated_op);
+        pop_stack();
+        set_pc(last_call_ret_addr);
+        SimpleCompiler compiler(buffer.get());
+        compiler.call(asmjit::imm_ptr(jump_dest));
+        auto written = compiler.finalize();
+        write_interrupt_block();
+        cont_addr = written.getRawBuffer();
+      } else {
+        // we are jumping to another method and isn't the first instruction, which means that this is behaving like a tail call optimization
+        register_t return_pc = peek_stack();
+        set_pc(return_pc);
+        SimpleCompiler compiler(buffer.get());
+        // pop the previous return address off the stack
+        compiler.add(asmjit::x86::rsp, asmjit::imm(8));
+        compiler.call(asmjit::imm_ptr(jump_dest));
+        auto written = compiler.finalize();
+        write_interrupt_block();
+        cont_addr = written.getRawBuffer();
       }
+      continue_program(cont_addr);
+      return;
+
     }
+
+    // if(last_call_instruction + 1 == icount) {
+    //   // then the first operation in this method was a jump, which means that we were probably jumping through a redirect with the dynamic linker
+    //   if(!manager->should_trace_method((void*)jump_dest)) {
+    //     mem_loc_t cont_addr;
+    //     {
+    //       buffer->setOffset(last_call_generated_op);
+    //       pop_stack();
+    //       set_pc(last_call_ret_addr);
+    //       SimpleCompiler compiler(buffer.get());
+    //       compiler.call(asmjit::imm_ptr(jump_dest));
+    //       auto written = compiler.finalize();
+    //       write_interrupt_block();
+    //       cont_addr = written.getRawBuffer();
+    //     }
+    //     continue_program(cont_addr);
+    //     return;
+    //   }
+    // }
     set_pc(jump_dest);
     return;
   }
@@ -1245,5 +1310,15 @@ void Tracer::abort() {
     // auto r_cb = compiler.MakeResumeTraceBlock(current_location);
     // compiler.jmp(asmjit::imm_ptr(r_cb.getRawBuffer()));
   }
+  continue_program(current_location);
+}
+
+
+void Tracer::run_debugger() {
+  red_printf("\n----ABORT debugger---\n");
+  SimpleCompiler compiler(buffer.get());
+  compiler.int3();
+  //compiler.hlt();
+  compiler.finalize();
   continue_program(current_location);
 }

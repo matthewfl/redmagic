@@ -38,7 +38,14 @@ namespace redmagic {
     void* TempDisableTrace();
     void TempEnableTrace(void *resume_pc) { set_pc((uint64_t)resume_pc); }
 
+    void* ReplaceIsTracedCall();
+
     inline void *get_start_location() { return (void*)trace_start_location; }
+
+    inline void set_where_to_patch(int32_t *addr) {
+      assert(finish_patch_addr == nullptr);
+      finish_patch_addr = addr;
+    }
 
     inline mem_loc_t get_origional_pc() { return udis_loc; }
 
@@ -47,7 +54,6 @@ namespace redmagic {
     // std::unique_lock<std::mutex> generation_lock = std::unique_lock<std::mutex>(_generation_mutex);
 
   private:
-
 
     void set_pc(uint64_t);
 
@@ -62,9 +68,20 @@ namespace redmagic {
     // jump back to the normal execution of this program
     void abort();
 
+    // write int3 and switch the stack to that
+    void run_debugger();
+
+    // when done patch the address that needs to link to this trace
+    void finish_patch();
+
     inline register_t pop_stack() {
       register_t r = *((register_t*)((mem_loc_t)regs_struct->rsp + move_stack_by));
       move_stack_by += sizeof(register_t);
+      return r;
+    }
+
+    inline register_t peek_stack() {
+      register_t r = *((register_t*)((mem_loc_t)regs_struct->rsp + move_stack_by));
       return r;
     }
 
@@ -138,6 +155,7 @@ namespace redmagic {
     mem_loc_t trace_start_location; // where this current trace begins
     mem_loc_t loop_start_location; // where it should branch the loop back to
 
+    int32_t *finish_patch_addr = nullptr;
 
     // mem_loc_t stack;
 

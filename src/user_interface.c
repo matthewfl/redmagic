@@ -45,3 +45,4 @@ USER_INTERFACE(fellthrough_branch);
 USER_INTERFACE(ensure_not_traced);
 USER_INTERFACE(temp_disable);
 USER_INTERFACE(temp_enable);
+USER_INTERFACE(is_traced);

@@ -62,6 +62,12 @@ namespace redmagic {
     void *temp_disable(void *resume_pc);
     void *temp_enable(void *resume_pc);
 
+    void* is_traced_call();
+
+    void do_not_trace_method(void *addr);
+
+
+
     uint32_t get_thread_id();
 
     tracer_stack_state* push_tracer_stack();

@@ -62,6 +62,10 @@ extern "C" void* red_user_temp_disable(void *_, void *ret_addr) {
   //return NULL;
 }
 
+extern "C" void* red_user_is_traced(void *_, void *ret_addr) {
+  return manager->is_traced_call();
+}
+
 extern "C" void* red_user_temp_enable(void *_, void *ret_addr) {
   return manager->temp_enable(ret_addr);
   //assert(0);
@@ -84,15 +88,31 @@ extern "C" void redmagic_start() {
   // assert(!r);
 }
 
+extern "C" void redmagic_do_not_trace_function(void *function_pointer) {
+  manager->do_not_trace_method(function_pointer);
+}
+
 static const char *avoid_inlining_methods[] = {
   // inlining the allocator doesn't really help since it will have a lot of branching
   // in trying to find where there is open memory
   "malloc",
   "free",
+  "cfree", // python is somehow using this?
   "realloc",
   "calloc",
   "exit",
   "abort",
+
+  // we use the dl calls while debugging at least so don't inline them since there might be conflicts
+  "dlopen",
+  "dlclose",
+  "dlsym",
+  "dlmopen",
+  "dlvsym",
+  "dladdr",
+  "dladdr1",
+  "dlinfo",
+
 
   // we don't want to inline ourselves
   // so record the entry functions
@@ -129,6 +149,10 @@ Manager::Manager() {
   dlclose(dlh);
 
   get_tracer_head();
+}
+
+void Manager::do_not_trace_method(void *addr) {
+  no_trace_methods.insert(addr);
 }
 
 uint32_t Manager::get_thread_id() {
@@ -345,6 +369,14 @@ void* Manager::temp_enable(void *resume_pc) {
   // }
   // is_temp_disabled = false;
   // return NULL;
+}
+
+void* Manager::is_traced_call() {
+  auto head = get_tracer_head();
+  if(head->is_traced) {
+    return head->tracer->ReplaceIsTracedCall();
+  }
+  return NULL;
 }
 
 uint32_t Manager::tracer_stack_size() {
