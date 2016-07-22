@@ -117,6 +117,7 @@ namespace redmagic {
   //extern thread_local void *trace_id; // id of current executing trace
   //extern thread_local bool is_traced;
   extern Manager *manager;
+  extern thread_local bool protected_malloc;
 
 
   class CodeBuffer final {

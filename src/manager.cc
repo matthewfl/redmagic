@@ -168,6 +168,8 @@ uint32_t Manager::get_thread_id() {
 
 void* Manager::begin_trace(void *id, void *ret_addr) {
 
+  protected_malloc = false;
+
   branch_info *info = &branches[id];
   if(info->disabled)
     return NULL; // do not trace this loop
@@ -211,6 +213,7 @@ void* Manager::begin_trace(void *id, void *ret_addr) {
     ret = l->Start(trace_pc);
     new_head->is_traced = true;
     info->starting_point = l->get_start_location();
+    protected_malloc = true;
   }
   //return NULL;
   return ret;
@@ -225,7 +228,7 @@ void* Manager::end_trace(void *id) {
   assert(head->trace_id == id);
   assert(head->tracer == info->tracer);
   l = head->tracer;
-  head->tracer = nullptr;
+
 
   // ret is going to be the address of the normal execution
   ret = l->EndTraceFallthrough();
@@ -238,11 +241,13 @@ void* Manager::end_trace(void *id) {
   //is_traced = false;
   l->tracing_from.store(0);
 
+  info->tracer = head->tracer = nullptr;
 
   Tracer *expected = nullptr;
   if(!free_tracer_list.compare_exchange_strong(expected, l)) {
     // failled to save the tracer to the free list head
-    delete l;
+    // TODO: the tracer holds the only refernece to the code buff which is in a shared pointer, so can't delete.....
+    //delete l;
   }
 
 
@@ -257,20 +262,26 @@ void* Manager::jump_to_trace(void *id) {
 }
 
 void* Manager::backwards_branch(void *id, void *ret_addr) {
+  // ignore
+  if(id == nullptr)
+    return NULL;
   //return NULL;
   auto head = get_tracer_head();
   if(head->is_traced) {
     if(id == head->trace_id) {
+      auto info = &branches[id];
       assert(!head->is_compiled);
+      assert(head->tracer == info->tracer);
       void *ret = head->tracer->EndTraceLoop();
       head->is_compiled = true;
       Tracer *l = head->tracer;
-      head->tracer = nullptr;
+      info->tracer = head->tracer = nullptr;
 
       Tracer *expected = nullptr;
       if(!free_tracer_list.compare_exchange_strong(expected, l)) {
         // failled to save the tracer to the free list head
-        delete l;
+        // TODO: the tracer holds the only refernece to the code buff which is in a shared pointer, so can't delete.....
+        //delete l;
       }
 
       // We are continuing the loop so there is no need to check the parent stack frame
@@ -321,6 +332,9 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
 }
 
 void* Manager::fellthrough_branch(void *id) {
+  // ignore
+  if(id == nullptr)
+    return NULL;
   auto head = get_tracer_head();
   if(head->trace_id == id && head->is_traced) {
     return end_trace(id);
@@ -348,22 +362,27 @@ void* Manager::temp_disable(void *resume_pc) {
   assert(!head->is_temp_disabled);
   head->is_temp_disabled = true;
   void *ret = NULL;
-  if(head->is_traced) {
+  assert(!head->is_traced || head->tracer);
+  if(head->tracer) {
+    // this will push the stack
     ret = head->tracer->TempDisableTrace();
+    protected_malloc = false;
+  } else {
+    push_tracer_stack();
   }
-  push_tracer_stack();
   return ret;
 }
 
 void* Manager::temp_enable(void *resume_pc) {
   auto old_head = pop_tracer_stack();
-  assert(!old_head.is_traced);
+  assert(!old_head.is_temp_disabled);
   auto head = get_tracer_head();
   assert(head->is_temp_disabled);
   head->is_temp_disabled = false;
   void *ret = NULL;
-  if(head->is_traced) {
+  if(head->tracer) {
     head->tracer->TempEnableTrace(resume_pc);
+    protected_malloc = true;
   }
   if(head->resume_addr != nullptr) {
     ret = head->resume_addr;
@@ -416,12 +435,14 @@ tracer_stack_state* Manager::push_tracer_stack() {
 tracer_stack_state Manager::pop_tracer_stack() {
   auto r = threadl_tracer_stack.back();
   threadl_tracer_stack.pop_back();
+  assert(!threadl_tracer_stack.empty());
   stack_head = &threadl_tracer_stack.back();
   return r;
 }
 
 tracer_stack_state *Manager::get_tracer_head() {
   if(stack_head == nullptr) {
+    assert(threadl_tracer_stack.capacity() == 0);
     threadl_tracer_stack.reserve(50);
     tracer_stack_state e;
     threadl_tracer_stack.push_back(e);

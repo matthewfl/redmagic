@@ -11,7 +11,7 @@
 // we can't direclty use allocators when we are tracing since it might screw with their internal states
 
 // use mmap and mprotect to wrap all alloc options
-#define MPROTECTED_ALLOC (40*1024)
+//#define MPROTECTED_ALLOC (40*1024)
 
 #define NBUFFERS 6
 

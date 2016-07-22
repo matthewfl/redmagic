@@ -102,6 +102,8 @@ extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_addr
   //void *patch = NULL;
 
   auto head = manager->get_tracer_head();
+  assert(head->trace_id != nullptr);
+  auto info = &manager->branches[head->trace_id];
 
   // remove the free tracer
   // TODO: make this into an actual linked list so that we can keep these tracers around and reuse?
@@ -116,7 +118,8 @@ extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_addr
   assert(old_tracing_from == 0);
 
   assert(head->tracer == nullptr);
-  head->tracer = l;
+  assert(info->tracer == nullptr);
+  info->tracer = head->tracer = l;
 
   head->is_compiled = false;
 
@@ -140,6 +143,7 @@ extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_addr
 
   assert(ret != NULL);
 
+  protected_malloc = true;
 
   *((register_t*)(regs_struct->rsp - TRACE_RESUME_ADDRESS_OFFSET)) = (register_t)ret;
   //return ret;
@@ -153,6 +157,7 @@ extern "C" void red_set_temp_resume(void *resume_addr) {
   assert(head->resume_addr == nullptr);
   head->resume_addr = resume_addr;
   head->is_temp_disabled = true;
+  manager->push_tracer_stack();
   //temp_disable_resume = resume_addr;
 }
 
@@ -162,8 +167,19 @@ extern "C" void* red_end_trace(mem_loc_t normal_end_address) {
   auto head = manager->pop_tracer_stack();
   auto new_head = manager->get_tracer_head();
   assert(head.is_traced);
-  assert(!new_head->is_traced); // TODO: resuming a previously interrupted trace
-  return (void*)normal_end_address;
+  //assert(!new_head->is_traced); // TODO: resuming a previously interrupted trace
+  void *ret = (void*)normal_end_address;
+  if(new_head->is_traced) {
+    if(new_head->tracer) {
+      new_head->tracer->JumpFromNestedLoop((void*)normal_end_address);
+    }
+    assert(new_head->resume_addr);
+    ret = new_head->resume_addr;
+    new_head->resume_addr = nullptr;
+  } else {
+    protected_malloc = false;
+  }
+  return ret;
 }
 
 extern "C" void* red_branch_to_sub_trace(void *resume_addr, void *sub_trace_id, void* target_rip) {
@@ -182,6 +198,10 @@ extern "C" void* red_branch_to_sub_trace(void *resume_addr, void *sub_trace_id, 
     // maybe treat this as a temp disabled inner loop
   }
   assert(info->starting_point != nullptr);
+  auto new_head = manager->push_tracer_stack();
+  new_head->is_traced = true;
+  new_head->trace_id = sub_trace_id;
+
   return info->starting_point;
 }
 
@@ -484,7 +504,9 @@ void* Tracer::ReplaceIsTracedCall() {
 void Tracer::finish_patch() {
   if(finish_patch_addr != nullptr) {
     mem_loc_t irip = ((mem_loc_t)finish_patch_addr) + 4;
-    int32_t d = trace_start_location - irip;
+    int64_t dl = trace_start_location - irip;
+    int32_t d = dl;
+    assert(d == dl);
     *finish_patch_addr = d;
     finish_patch_addr = nullptr;
   }
@@ -1381,6 +1403,7 @@ void Tracer::abort() {
     // auto r_cb = compiler.MakeResumeTraceBlock(current_location);
     // compiler.jmp(asmjit::imm_ptr(r_cb.getRawBuffer()));
   }
+  protected_malloc = false;
   continue_program(current_location);
 }
 

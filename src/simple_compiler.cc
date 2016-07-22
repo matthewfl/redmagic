@@ -41,7 +41,8 @@ CodeBuffer SimpleCompiler::finalize_bottom() {
   //void *start = make();
   void *gen_loc = buffer->buffer + buffer->size - buffer->trampolines_size - size;
   size_t gen_c_size = relocCode(gen_loc);
-  assert(gen_c_size == minSize);
+  assert(minSize == getOffset());
+  assert(gen_c_size == size); // return the full size
 
   buffer->trampolines_size += minSize;
   assert(gen_loc == (void*)(buffer->buffer + buffer->size - buffer->trampolines_size));
@@ -517,10 +518,6 @@ size_t SimpleCompiler::_relocCode(void* _dst, asmjit::Ptr baseAddress) const noe
 #endif // !ASMJIT_DISABLE_LOGGER
     }
   }
-
-
-
-
 
   // if (arch == kArchX64)
   //   return (size_t)(dst_end - dst);
