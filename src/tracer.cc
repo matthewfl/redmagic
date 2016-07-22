@@ -179,6 +179,7 @@ extern "C" void* red_end_trace(mem_loc_t normal_end_address) {
   } else {
     protected_malloc = false;
   }
+  red_printf("exiting trace %x\n", head.trace_id);
   return ret;
 }
 
@@ -459,12 +460,28 @@ void* Tracer::TempDisableTrace() {
   compiler.mov(asmjit::x86::r15, asmjit::imm_u(0xdeadcafe));
   compiler.bind(label);
   auto written = compiler.finalize();
+  // SimpleCompiler compiler2(buffer.get());
+  // compiler2.mov(asmjit::x86::rax, asmjit::x86::ptr(asmjit::x86::rsp, -8));
+  // compiler2.TestRegister(RAX)
   write_interrupt_block();
 
   //temp_disable_resume = (void*)(written.getRawBuffer() + written.getOffset());
   red_set_temp_resume((void*)(written.getRawBuffer() + written.getOffset()));
 
   return (void*)last_call_ret_addr;
+}
+
+extern "C" void red_asm_jump_rsi();
+
+void Tracer::TempEnableTrace(void *resume_pc) {
+  // check that the temp enable instruction is coming in at a expected spot, otherwise fork a new trace
+  set_pc((mem_loc_t)resume_pc);
+  SimpleCompiler compiler(buffer.get());
+  // the "normal" return address will be set to ris when this returns from the temp disabled region
+  //compiler.mov(asmjit::x86::rax, asmjit::x86::ptr(asmjit::x86::rsp, -8));
+  compiler.TestRegister((mem_loc_t)&red_asm_jump_rsi, RSI, (register_t)resume_pc);
+  auto written = compiler.finalize();
+  write_interrupt_block();
 }
 
 extern "C" void red_asm_start_nested_trace();
@@ -1345,6 +1362,7 @@ void Tracer::replace_rip_instruction() {
     //case UD_Ipush: // have to do push independently since the stack is moving
   case UD_Iadd:
   case UD_Isub:
+  case UD_Iimul:
   case UD_Icmp:
   case UD_Itest:
   case UD_Ixor:

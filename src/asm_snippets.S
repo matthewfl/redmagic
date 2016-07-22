@@ -136,7 +136,9 @@ red_asm_pop_all_regs_start:
   m_pop_all_regs
 red_asm_pop_all_regs_end:
 
-
+  .global red_asm_jump_rsi
+red_asm_jump_rsi:
+  jmp *%rsi
 
 // we don't need executable stack
   .section .note.GNU-stack,"",%progbits

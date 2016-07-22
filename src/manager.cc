@@ -129,6 +129,9 @@ static const char *avoid_inlining_methods[] = {
   "redmagic_ensure_not_traced",
   "redmagic_temp_disable",
   "redmagic_temp_enable",
+  "redmagic_is_traced",
+  "redmagic_disable_branch",
+  "redmagic_do_not_trace_function"
 };
 
 // namespace redmagic {
@@ -319,6 +322,7 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
       head->is_compiled = true;
       head->is_traced = true;
       head->trace_id = id;
+      red_printf("entering trace %x\n", id);
       return info->starting_point;
     }
     // don't care about atomic since we are just trying to get an estimate, so if we lose some counts it is fine

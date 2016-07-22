@@ -8,7 +8,7 @@
 #ifndef DISABLE_REDMAGIC
 
 __asm__("jmp_rax: \n"
-        "add $8, %rsp \n"
+        "pop %rsi \n"
         "jmp *%rax \n"
         );
 

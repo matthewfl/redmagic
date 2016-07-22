@@ -40,7 +40,7 @@ namespace redmagic {
 
     // generate a temp disable command, sets the thread local where to resume to address
     void* TempDisableTrace();
-    void TempEnableTrace(void *resume_pc) { set_pc((uint64_t)resume_pc); }
+    void TempEnableTrace(void *resume_pc);// { set_pc((uint64_t)resume_pc); }
 
     void* ReplaceIsTracedCall();
 
