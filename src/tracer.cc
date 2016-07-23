@@ -36,7 +36,7 @@ static int udis_input_hook (ud_t *ud) {
   return (int)*((uint8_t*)l);
 }
 
-Tracer::Tracer(shared_ptr<CodeBuffer> buffer) {
+Tracer::Tracer(CodeBuffer* buffer) {
   this->buffer = buffer;
 
   ud_init(&disassm);
@@ -73,6 +73,8 @@ Tracer::~Tracer() {
   // free((void*)stack);
 
   // free((void*)stack);
+  if(buffer != nullptr)
+    CodeBuffer::Release(buffer);
 }
 
 
@@ -221,7 +223,7 @@ void* Tracer::Start(void *start_addr) {
   //red_asm_start_tracing(NULL, (void*)&red_begin_tracing, this, stack - sizeof(stack));
 
   using namespace asmjit;
-  SimpleCompiler compiler(buffer.get());
+  SimpleCompiler compiler(buffer);
   //compiler.mov(x86::rdx, x86::rsp);
   // stash the values of the register that we are about to override
   compiler.mov(x86::ptr(x86::rsp, static_cast<int32_t>(-TRACE_STACK_OFFSET - sizeof(struct user_regs_struct))), x86::rdx);
@@ -304,10 +306,32 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
     last_location = udis_loc;
     local_jump_min_addr = last_local_jump = 0;
     assert(current_location == last_location);
+    assert(protected_malloc);
     //assert(generation_lock.owns_lock());
 
-    // TODO: manage cases where the buffer runs out of space
-    assert(buffer->getFree() > 100 * 1024);
+    // if we somehow have less then 1kb free then we might have overwritten something
+    // which is why this is asserted as an error
+    assert(buffer->getFree() > 1024);
+    if(buffer->getFree() <= 10 * 1024) {
+      // there is less than 10 kb of space on this buffer, so we are going to make a new one
+      protected_malloc = false;
+      auto new_buffer = CodeBuffer::CreateBuffer(1024 * 1024);
+      {
+        SimpleCompiler compiler(new_buffer);
+        compiler.mov(asmjit::x86::r15, asmjit::imm_u(0xdeadcafe));
+        compiler.mov(asmjit::x86::r15, asmjit::imm_u(generated_location));
+      }
+      auto new_gen_l = new_buffer->getRawBuffer() + new_buffer->getOffset();
+      {
+        SimpleCompiler compiler(buffer);
+        compiler.jmp(asmjit::imm_ptr(new_gen_l));
+        auto written = compiler.finalize();
+      }
+      CodeBuffer::Release(buffer);
+      buffer = new_buffer;
+      generated_location = new_gen_l;
+      protected_malloc = true;
+    }
 
   processes_instructions:
     while(ud_disassemble(&disassm)) {
@@ -421,7 +445,7 @@ void* Tracer::EndTraceFallthrough() {
   assert(icount - last_call_instruction < 2);
   red_printf("tracer end fallthrough\n");
   buffer->setOffset(last_call_generated_op);
-  SimpleCompiler compiler(buffer.get());
+  SimpleCompiler compiler(buffer);
   compiler.mov(asmjit::x86::rdi, asmjit::imm_u(last_call_ret_addr));
   compiler.jmp(asmjit::imm_ptr(&red_asm_end_trace));
   auto w = compiler.finalize();
@@ -441,7 +465,7 @@ void* Tracer::EndTraceLoop() {
   assert(loop_location);
 
   buffer->setOffset(last_call_generated_op);
-  SimpleCompiler compiler(buffer.get());
+  SimpleCompiler compiler(buffer);
   compiler.jmp(asmjit::imm_ptr(loop_location));
   finish_patch();
   tracing_from = 0;
@@ -451,7 +475,7 @@ void* Tracer::EndTraceLoop() {
 void* Tracer::TempDisableTrace() {
   assert(icount - last_call_instruction < 2);
   buffer->setOffset(last_call_generated_op);
-  SimpleCompiler compiler(buffer.get());
+  SimpleCompiler compiler(buffer);
   auto label = compiler.newLabel();
   //compiler.mov(asmjit::x86::rdi, asmjit::imm_u(0xfafafafafafafafa));
   compiler.lea(asmjit::x86::rdi, asmjit::x86::ptr(label));
@@ -476,7 +500,7 @@ extern "C" void red_asm_jump_rsi();
 void Tracer::TempEnableTrace(void *resume_pc) {
   // check that the temp enable instruction is coming in at a expected spot, otherwise fork a new trace
   set_pc((mem_loc_t)resume_pc);
-  SimpleCompiler compiler(buffer.get());
+  SimpleCompiler compiler(buffer);
   // the "normal" return address will be set to ris when this returns from the temp disabled region
   //compiler.mov(asmjit::x86::rax, asmjit::x86::ptr(asmjit::x86::rsp, -8));
   compiler.TestRegister((mem_loc_t)&red_asm_jump_rsi, RSI, (register_t)resume_pc);
@@ -490,7 +514,7 @@ void Tracer::JumpToNestedLoop(void *nested_trace_id) {
   // there should have been a backwards branch instruction that we are going to replace
   assert(icount - last_call_instruction < 2);
   buffer->setOffset(last_call_generated_op);
-  SimpleCompiler compiler(buffer.get());
+  SimpleCompiler compiler(buffer);
   compiler.mov(asmjit::x86::rdi, asmjit::imm_u(0xfafafafafafafafa));
   compiler.mov(asmjit::x86::rsi, asmjit::imm_ptr(nested_trace_id));
   compiler.mov(asmjit::x86::rdx, asmjit::imm_u(last_call_ret_addr));
@@ -508,7 +532,7 @@ void Tracer::JumpToNestedLoop(void *nested_trace_id) {
 void* Tracer::ReplaceIsTracedCall() {
   assert(icount - last_call_instruction < 2);
   buffer->setOffset(last_call_generated_op);
-  SimpleCompiler compiler(buffer.get());
+  SimpleCompiler compiler(buffer);
   compiler.mov(asmjit::x86::rax, asmjit::imm(1));
   auto written = compiler.finalize();
   write_interrupt_block();
@@ -584,7 +608,7 @@ void Tracer::write_interrupt_block() {
   {
     // TODO: DON'T USE SimpleCompiler here, it has a high overhead for starting and cleanup
     // will be much faster to just hardcode a jmp with 32 bid address
-    SimpleCompiler compiler(buffer.get());
+    SimpleCompiler compiler(buffer);
     compiler.jmp(asmjit::imm_u(interrupt_block_location));
   }
   buffer->setOffset(offset);
@@ -962,7 +986,7 @@ void Tracer::evaluate_instruction() {
       }
     }
 
-    SimpleCompiler compiler(buffer.get());
+    SimpleCompiler compiler(buffer);
 
     auto cb_b = compiler.ConditionalJump(alternate_instructions, AlignedInstructions::get_asm_mnem(emit));
 
@@ -1044,7 +1068,7 @@ void Tracer::evaluate_instruction() {
       // auto written = buffer->writeToEnd(test_register_instructions[ri].instruction);
       // written.replace_stump<uint64_t>(0xfafafafafafafafa, rv);
 
-      SimpleCompiler compiler(buffer.get());
+      SimpleCompiler compiler(buffer);
       auto r_cb = compiler.TestRegister(ud_insn_off(&disassm), ri, rv);
       auto written = compiler.finalize();
 
@@ -1065,7 +1089,7 @@ void Tracer::evaluate_instruction() {
         }
         jump_dest = t;
       } else {
-        SimpleCompiler compiler(buffer.get());
+        SimpleCompiler compiler(buffer);
         AlignedInstructions ali(&disassm);
         auto v = get_opr_value(opr);
         compiler.add_used_registers(ali.registers_used());
@@ -1105,7 +1129,7 @@ void Tracer::evaluate_instruction() {
         buffer->setOffset(last_call_generated_op);
         pop_stack();
         set_pc(last_call_ret_addr);
-        SimpleCompiler compiler(buffer.get());
+        SimpleCompiler compiler(buffer);
         compiler.call(asmjit::imm_ptr(jump_dest));
         auto written = compiler.finalize();
         write_interrupt_block();
@@ -1114,7 +1138,7 @@ void Tracer::evaluate_instruction() {
         // we are jumping to another method and isn't the first instruction, which means that this is behaving like a tail call optimization
         register_t return_pc = peek_stack();
         set_pc(return_pc);
-        SimpleCompiler compiler(buffer.get());
+        SimpleCompiler compiler(buffer);
         // pop the previous return address off the stack
         compiler.add(asmjit::x86::rsp, asmjit::imm(8));
         compiler.call(asmjit::imm_ptr(jump_dest));
@@ -1183,7 +1207,7 @@ void Tracer::evaluate_instruction() {
     } else {
 
       // TODO: check that the register is pointing at the same location in memory
-      SimpleCompiler compiler(buffer.get());
+      SimpleCompiler compiler(buffer);
       AlignedInstructions ali(&disassm);
       auto v = get_opr_value(opr1);
       compiler.add_used_registers(ali.registers_used());
@@ -1228,7 +1252,7 @@ void Tracer::evaluate_instruction() {
       // written.replace_stump<uint64_t>(0xfafafafafafafafa, call_pc);
       mem_loc_t cont_addr;
       {
-        SimpleCompiler compiler(buffer.get());
+        SimpleCompiler compiler(buffer);
         compiler.call(asmjit::imm_ptr(call_pc));
         auto cb = compiler.finalize();
 
@@ -1244,7 +1268,7 @@ void Tracer::evaluate_instruction() {
       // inline this method, so push the return address and continue
       // auto written = buffer->writeToEnd(cb_asm_push_stack);
       // written.replace_stump<uint64_t>(0xfafafafafafafafa, ret_addr);
-      SimpleCompiler compiler(buffer.get());
+      SimpleCompiler compiler(buffer);
       // compiler.mov(asmjit::x86::r15, asmjit::imm(ret_addr));
       // compiler.push(asmjit::imm(ret_addr));
       compiler.Push64bitValue(ret_addr);
@@ -1308,7 +1332,7 @@ void Tracer::replace_rip_instruction() {
 
       // auto written = buffer->writeToEnd(set_register_instructions[dest].instruction);
       // written.replace_stump<uint64_t>(0xfafafafafafafafa, val.address);
-      SimpleCompiler compiler(buffer.get());
+      SimpleCompiler compiler(buffer);
       compiler.SetRegister(dest, val.address);
       return;
     }
@@ -1330,7 +1354,7 @@ void Tracer::replace_rip_instruction() {
       // assert(opr1->type == UD_OP_REG);
       int dest = ud_register_to_sys(opr1->base);
 
-      SimpleCompiler compiler(buffer.get());
+      SimpleCompiler compiler(buffer);
       auto r = compiler.get_register(dest);
       compiler.mov(r, asmjit::imm_u(val.address));
       // use the aligned instruction so that the correct size is read from memory
@@ -1348,7 +1372,7 @@ void Tracer::replace_rip_instruction() {
     assert(opr1->index == UD_NONE);
     opr_value val = get_opr_value(opr1);
     assert(val.is_ptr);
-    SimpleCompiler compiler(buffer.get());
+    SimpleCompiler compiler(buffer);
     compiler.PushMemoryLocationValue(val.address);
     auto written = compiler.finalize();
     return;
@@ -1380,7 +1404,7 @@ void Tracer::replace_rip_instruction() {
       assert((used_registers & (1 << RSP)) == 0);
       used_registers &= ~(1 << RIP);
 
-      SimpleCompiler compiler(buffer.get());
+      SimpleCompiler compiler(buffer);
       compiler.add_used_registers(used_registers);
       auto scr = compiler.get_scratch_register();
       compiler.mov(scr, udis_loc); // load the current rip into the scratch register
@@ -1428,7 +1452,7 @@ void Tracer::abort() {
 
 void Tracer::run_debugger() {
   red_printf("\n----ABORT debugger---\n");
-  SimpleCompiler compiler(buffer.get());
+  SimpleCompiler compiler(buffer);
   compiler.int3();
   //compiler.hlt();
   compiler.finalize();

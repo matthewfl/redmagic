@@ -200,7 +200,8 @@ void* Manager::begin_trace(void *id, void *ret_addr) {
     //assert(tracer == nullptr);
     assert(info->tracer == nullptr);
 
-    auto buff = make_shared<CodeBuffer>(4 * 1024 * 1024);
+    //auto buff = make_shared<CodeBuffer>(4 * 1024 * 1024);
+    auto buff = CodeBuffer::CreateBuffer(1024 * 1024);
     new_head->tracer = l = new Tracer(buff);
     l->tracing_from = (mem_loc_t)trace_pc;
     l->owning_thread = get_thread_id();

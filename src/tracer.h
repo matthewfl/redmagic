@@ -14,7 +14,7 @@ namespace redmagic {
 
   class Tracer {
   public:
-    Tracer(std::shared_ptr<CodeBuffer> buffer);
+    Tracer(CodeBuffer* buffer);
     ~Tracer();
 
     // create a new tracer with jumps to new address
@@ -136,7 +136,7 @@ namespace redmagic {
     struct user_regs_struct *regs_struct = nullptr;
     int64_t move_stack_by = 0;
 
-    std::shared_ptr<CodeBuffer> buffer;
+    CodeBuffer* buffer;
     ud_t disassm;
     uint64_t udis_loc;
 

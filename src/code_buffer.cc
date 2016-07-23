@@ -1,35 +1,101 @@
 #include "jit_internal.h"
 
 #include <sys/mman.h>
+#include <mutex>
 
-using namespace std;
+
 
 using namespace redmagic;
 
 extern "C" void red_asm_compile_buff_near();
 
-CodeBuffer::CodeBuffer(size_t size):
-  size(size),
-  owns_buffer(true),
-  can_write_buffer(true),
-  buffer_consumed(0)
-{
+namespace redmagic {
+  std::mutex code_buffer_mutex;
 
-  buffer = (uint8_t*)mmap((void*)&red_asm_compile_buff_near,
+  std::vector<CodeBuffer*> owning_code_buffers;
+
+  std::vector<CodeBuffer*> unallocated_code_buffers;
+}
+
+CodeBuffer* CodeBuffer::CreateBuffer(size_t size) {
+  std::lock_guard<std::mutex> lock(code_buffer_mutex);
+
+  for(auto it = unallocated_code_buffers.begin(); it != unallocated_code_buffers.end(); it++) {
+    if((*it)->getFree() > size) {
+      CodeBuffer *ret = *it;
+      unallocated_code_buffers.erase(it);
+      return ret;
+    }
+  }
+
+  // we could not find an open buffer that has enough space to satasify this request
+  if(size < 4 * 1024 * 1024) {
+    // the min size that we will allocate
+    size = 4 * 1024 * 1024;
+  } else if((size & (4*1024 - 1)) != 0) {
+    // request in page amounts
+    size += 4 * 1024;
+    size &= (4*1024 - 1);
+  }
+
+  uint8_t *buffer = (uint8_t*)mmap((void*)&red_asm_compile_buff_near,
     size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANON, -1, 0);
 
   if(buffer == MAP_FAILED) {
     perror("failed to mmap buffer");
   }
   memset(buffer, 0, size);
+
+  CodeBuffer* ret = new CodeBuffer();
+  owning_code_buffers.push_back(ret);
+
+  ret->size = size;
+  ret->owns_buffer = true;
+  ret->can_write_buffer = true;
+  ret->buffer_consumed = 0;
+  ret->buffer = buffer;
+
+  return ret;
 }
 
-CodeBuffer::~CodeBuffer() {
-  if(owns_buffer) {
-    if(munmap(buffer, size) < 0) {
-      perror("failed to unmap buffer");
-    }
+
+void CodeBuffer::Release(CodeBuffer *x) {
+  std::lock_guard<std::mutex> lock(code_buffer_mutex);
+
+  assert(x->owns_buffer);
+
+  // this buffer should not already be in the list of currently unused
+  for(auto it : unallocated_code_buffers) {
+    assert(x != it);
   }
+
+  unallocated_code_buffers.push_back(x);
+}
+
+// CodeBuffer::CodeBuffer(size_t size):
+//   size(size),
+//   owns_buffer(true),
+//   can_write_buffer(true),
+//   buffer_consumed(0)
+// {
+
+//   buffer = (uint8_t*)mmap((void*)&red_asm_compile_buff_near,
+//     size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANON, -1, 0);
+
+//   if(buffer == MAP_FAILED) {
+//     perror("failed to mmap buffer");
+//   }
+//   memset(buffer, 0, size);
+// }
+
+CodeBuffer::~CodeBuffer() {
+  // if(owns_buffer) {
+  //   if(munmap(buffer, size) < 0) {
+  //     perror("failed to unmap buffer");
+  //   }
+  // }
+  // can't un allocate an owning buffer atm
+  assert(!owns_buffer);
 }
 
 CodeBuffer::CodeBuffer(mem_loc_t start, size_t size, bool override_can_write):
@@ -54,6 +120,7 @@ CodeBuffer::CodeBuffer(CodeBuffer &&x) {
   trampolines_size = x.trampolines_size;
   size = x.size;
   buffer_consumed = x.buffer_consumed;
+  assert(!x.owns_buffer); /////// TODO: move an owning buffer?
   owns_buffer = x.owns_buffer;
   x.owns_buffer = false;
   can_write_buffer = x.can_write_buffer;

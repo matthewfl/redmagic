@@ -122,7 +122,14 @@ namespace redmagic {
 
   class CodeBuffer final {
   public:
-    CodeBuffer(size_t size);
+    //
+  public:
+    // creates a Code Buffer that "owns" a region of memory that is of at least size
+    static CodeBuffer* CreateBuffer(size_t size);
+    // when done with a code buffer release it back to a memory pool
+    static void Release(CodeBuffer *x);
+
+    //CodeBuffer(size_t size);
     CodeBuffer(mem_loc_t start, size_t size, bool override_can_write=false);
     CodeBuffer();
 
