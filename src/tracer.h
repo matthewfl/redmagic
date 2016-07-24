@@ -69,8 +69,15 @@ namespace redmagic {
     void continue_program(mem_loc_t);
     void write_interrupt_block();
 
-    // jump back to the normal execution of this program
+    // jump back to the normal execution of this program, no clean up
     void abort();
+
+    // delete the current trace and abort
+    void kill_trace();
+
+    // what ever the current function is, there is something about it that we don't like
+    // so blacklist it and kill the current trace
+    void blacklist_function();
 
     // write int3 and switch the stack to that
     void run_debugger();
@@ -163,6 +170,8 @@ namespace redmagic {
     mem_loc_t loop_start_location; // where it should branch the loop back to
 
     int32_t *finish_patch_addr = nullptr;
+
+    std::vector<mem_loc_t> method_address_stack;
 
     // mem_loc_t stack;
 

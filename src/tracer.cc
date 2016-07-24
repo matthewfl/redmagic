@@ -30,6 +30,27 @@ namespace {
   CodeBuffer cb_interrupt_block((mem_loc_t)&red_asm_resume_tracer_block_start, (size_t)((mem_loc_t)&red_asm_resume_tracer_block_end - (mem_loc_t)&red_asm_resume_tracer_block_start));
 }
 
+
+static int loop_n = 0;
+
+namespace redmagic {
+  long global_icount = 0;
+  // TODO: this is starting traces which then abort but really should branch back to normal code
+  // thus it is causing crashes after a while.....
+#ifdef CONF_GLOBAL_ABORT
+  long global_icount_abort = -1; //776640 * 4;
+
+  bool global_abort() {
+    if(global_icount_abort != -1 && global_icount > global_icount_abort) {
+      return true;
+    }
+    return false;
+  }
+#endif
+}
+
+
+
 static int udis_input_hook (ud_t *ud) {
   Tracer *t = (Tracer*)ud_get_user_opaque_data(ud);
   mem_loc_t l = t->_get_udis_location();
@@ -51,6 +72,8 @@ Tracer::Tracer(CodeBuffer* buffer) {
   written.replace_stump<uint64_t>(0xfafafafafafafafa, (uint64_t)&resume_struct);
 
   interrupt_block_location = written.getRawBuffer();
+
+  method_address_stack.reserve(100);
 
   // mem_loc_t stack_ptr = (mem_loc_t)malloc(12*1024 + TRACE_STACK_SIZE);
   // stack = stack_ptr;
@@ -100,12 +123,21 @@ extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_addr
 
   assert(regs_struct->rsp - TRACE_STACK_OFFSET == (register_t)regs_struct);
 
+
   void *ret = NULL;
   //void *patch = NULL;
 
   auto head = manager->get_tracer_head();
   assert(head->trace_id != nullptr);
   auto info = &manager->branches[head->trace_id];
+
+#ifdef CONF_GLOBAL_ABORT
+  if(global_abort()) {
+    head->did_abort = true;
+    *((register_t*)(regs_struct->rsp - TRACE_RESUME_ADDRESS_OFFSET)) = (register_t)target_rip;
+    return;
+  }
+#endif
 
   // remove the free tracer
   // TODO: make this into an actual linked list so that we can keep these tracers around and reuse?
@@ -145,7 +177,9 @@ extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_addr
 
   assert(ret != NULL);
 
-  protected_malloc = true;
+  red_printf("============================================\nresume trace %x at %#016lx\n", head->trace_id, target_rip);
+
+  //protected_malloc = true;
 
   *((register_t*)(regs_struct->rsp - TRACE_RESUME_ADDRESS_OFFSET)) = (register_t)ret;
   //return ret;
@@ -175,11 +209,16 @@ extern "C" void* red_end_trace(mem_loc_t normal_end_address) {
     if(new_head->tracer) {
       new_head->tracer->JumpFromNestedLoop((void*)normal_end_address);
     }
-    assert(new_head->resume_addr);
-    ret = new_head->resume_addr;
-    new_head->resume_addr = nullptr;
+    if(new_head->resume_addr) {
+      ret = new_head->resume_addr;
+      new_head->resume_addr = nullptr;
+    } else {
+#ifdef CONF_GLOBAL_ABORT
+      assert(global_abort());
+#endif
+    }
   } else {
-    protected_malloc = false;
+    //protected_malloc = false;
   }
   red_printf("exiting trace %x\n", head.trace_id);
   return ret;
@@ -195,7 +234,11 @@ extern "C" void* red_branch_to_sub_trace(void *resume_addr, void *sub_trace_id, 
 
   Manager::branch_info *info = &manager->branches[sub_trace_id];
   if(info->tracer != nullptr) {
-    assert(0);
+#ifdef CONF_GLOBAL_ABORT
+    assert(info->tracer->did_abort);
+#else
+    assert(0); // TODO: vvv
+#endif
     // TODO: pop this element off the manager stack and abort the trace by jumping back to normal code
     // also check that the inner loop wasn't aborted?
     // maybe treat this as a temp disabled inner loop
@@ -243,7 +286,7 @@ void* Tracer::Start(void *start_addr) {
   //compiler.mov(x86::rsp, imm_ptr(stack - sizeof(stack)));
   //compiler.push(imm_ptr(red_begin_tracing));
 
-  compiler.jmp(imm_u(interrupt_block_location));
+  compiler.jmp(imm_ptr(interrupt_block_location));
   compiler.mov(x86::r15, imm_u(0xdeadbeef));
   compiler.mov(x86::r15, imm_ptr(start_addr));
   //compiler.jmp(imm_ptr(start_addr));
@@ -251,6 +294,19 @@ void* Tracer::Start(void *start_addr) {
   auto written = compiler.finalize();
 
   trace_start_location = buffer->getRawBuffer() + buffer->getOffset();
+
+#if defined(NDEBUG) && defined(CONF_GLOBAL_ABORT)
+  if(global_abort()) {
+    // disable this tracing
+
+    SimpleCompiler compiler2(buffer);
+    compiler2.jmp(imm_ptr(start_addr));
+
+    did_abort = true;
+    manager->get_tracer_head()->did_abort = true;
+    return start_addr;
+  }
+#endif
 
   return (void*)written.getRawBuffer();
   //return (void*)&red_begin_tracing;
@@ -268,8 +324,6 @@ void* Tracer::Start(void *start_addr) {
 // 15 works, 16 breaks with `mov (%rdx, %rax) %eax`
 // 21 was breaking almost instantly after `jmp *%rax`
 
-int loop_n = 0;
-
 #ifndef NDEBUG
 bool Tracer::debug_check_abort() {
   // check specific conditions for performing an abort during debugging
@@ -278,6 +332,11 @@ bool Tracer::debug_check_abort() {
   if(icount >= ABORT_BEFORE)
     return true;
 #endif
+#ifdef CONF_GLOBAL_ABORT
+  if(global_abort())
+    return true;
+#endif
+
   // if(loop_n == 10)
   //   return true;
   return false;
@@ -314,6 +373,7 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
     assert(buffer->getFree() > 1024);
     if(buffer->getFree() <= 10 * 1024) {
       // there is less than 10 kb of space on this buffer, so we are going to make a new one
+      // disabling malloc protecting might be bad...
       protected_malloc = false;
       auto new_buffer = CodeBuffer::CreateBuffer(1024 * 1024);
       {
@@ -336,12 +396,16 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
   processes_instructions:
     while(ud_disassemble(&disassm)) {
 
+      ++icount;
+      ++global_icount;
+
+
 #ifdef CONF_VERBOSE
       Dl_info dlinfo;
       dladdr((void*)ud_insn_off(&disassm), &dlinfo);
       auto ins_loc = ud_insn_off(&disassm);
 
-      red_printf("[%8i %#016lx] \t%-35s %-20s %s\n", ++icount, ins_loc, ud_insn_asm(&disassm), ud_insn_hex(&disassm), dlinfo.dli_sname);
+      red_printf("[%10lu %8i %#016lx] \t%-35s %-20s %s\n", global_icount, icount, ins_loc, ud_insn_asm(&disassm), ud_insn_hex(&disassm), dlinfo.dli_sname);
 #endif
 
       //fprintf(stderr, );
@@ -449,6 +513,7 @@ void* Tracer::EndTraceFallthrough() {
   compiler.mov(asmjit::x86::rdi, asmjit::imm_u(last_call_ret_addr));
   compiler.jmp(asmjit::imm_ptr(&red_asm_end_trace));
   auto w = compiler.finalize();
+  method_address_stack.clear();
   finish_patch();
   tracing_from = 0;
   return (void*)w.getRawBuffer();
@@ -467,6 +532,7 @@ void* Tracer::EndTraceLoop() {
   buffer->setOffset(last_call_generated_op);
   SimpleCompiler compiler(buffer);
   compiler.jmp(asmjit::imm_ptr(loop_location));
+  method_address_stack.clear();
   finish_patch();
   tracing_from = 0;
   return (void*)loop_location;
@@ -548,6 +614,9 @@ void Tracer::finish_patch() {
     int64_t dl = trace_start_location - irip;
     int32_t d = dl;
     assert(d == dl);
+    assert(*finish_patch_addr == 0);
+    // check that there wasn't a previous tracer that did this
+    // TODO: concurrent blocking on these events
     *finish_patch_addr = d;
     finish_patch_addr = nullptr;
   }
@@ -1122,12 +1191,17 @@ void Tracer::evaluate_instruction() {
 
     process_jump_dest:
     assert(jump_dest != 0);
+    if(last_call_instruction + 1 == icount) {
+      // we are jumping to a method eg dynamically loaded, so change what we think the methods address is
+      method_address_stack.back() = jump_dest;
+    }
     if(!manager->should_trace_method((void*)jump_dest)) {
       mem_loc_t cont_addr;
       if(last_call_instruction + 1 == icount) {
         // then the first operation in this method was a jump, which means that we were probably jumping through a redirect with the dynamic linker
         buffer->setOffset(last_call_generated_op);
         pop_stack();
+        method_address_stack.pop_back(); // have to pop since we aren't inlining this
         set_pc(last_call_ret_addr);
         SimpleCompiler compiler(buffer);
         compiler.call(asmjit::imm_ptr(jump_dest));
@@ -1275,6 +1349,7 @@ void Tracer::evaluate_instruction() {
       auto w = compiler.finalize();
       push_stack(ret_addr);
       set_pc(call_pc);
+      method_address_stack.push_back(call_pc);
     }
 
     return;
@@ -1289,9 +1364,15 @@ void Tracer::evaluate_instruction() {
   case UD_Iret:
   case UD_Iretf: {
     const ud_operand_t *opr = ud_insn_opr(&disassm, 0);
+    // These prefixes are used for alignment purposes and have no impact on the execution of the instruction
+    // assert(disassm.pfx_rep == UD_NONE);
+    // assert(disassm.pfx_repe == UD_NONE);
+    // assert(disassm.pfx_repne == UD_NONE);
     assert(opr == NULL);
     buffer->writeToEnd(cb_asm_pop_stack);
     set_pc(pop_stack());
+    if(!method_address_stack.empty())
+      method_address_stack.pop_back();
     return;
   }
 
@@ -1342,7 +1423,8 @@ void Tracer::replace_rip_instruction() {
 
     /*... UD_Imovzx:*/
   case UD_Imov:
-  case UD_Imovsxd: {
+  case UD_Imovsxd:
+  case UD_Imovss: {
     const ud_operand_t *opr1 = ud_insn_opr(&disassm, 0); // dest address
     const ud_operand_t *opr2 = ud_insn_opr(&disassm, 1); // source address
     assert(opr1 != NULL && opr2 != NULL);
@@ -1436,17 +1518,39 @@ void Tracer::abort() {
   {
     red_printf("\n--ABORT--\n");
     did_abort = true;
-    manager->get_tracer_head()->is_traced = false;
+    auto head = manager->get_tracer_head();
+    head->did_abort = true;
+    //manager->get_tracer_head()->is_traced = false;
     //is_traced = false;
 
-    // // write a resume block here in case that we want to retry this trace
-    // // then we don't have to redo it from scratch
-    // SimpleCompiler compiler(buffer.get());
-    // auto r_cb = compiler.MakeResumeTraceBlock(current_location);
-    // compiler.jmp(asmjit::imm_ptr(r_cb.getRawBuffer()));
+    // // // write a resume block here in case that we want to retry this trace
+    // // // then we don't have to redo it from scratch
+    // SimpleCompiler compiler(buffer);
+    // // auto r_cb = compiler.MakeResumeTraceBlock(current_location);
+    // // compiler.jmp(asmjit::imm_ptr(r_cb.getRawBuffer()));
+    // compiler.jmp(asmjit::imm_ptr(current_location));
+    write_interrupt_block();
+    finish_patch();
   }
-  protected_malloc = false;
-  continue_program(current_location);
+  //protected_malloc = false;
+  mem_loc_t l = current_location;
+  while(true) {
+    continue_program(l);
+    red_printf("was running an aborted trace\n");
+  }
+
+
+  // did_abort = true;
+  // red_printf("\n--ABORT--\n");
+  // // hack so we can use the fallthrough
+  // last_call_generated_op = buffer->getOffset();
+  // last_call_instruction = icount;
+  // last_call_ret_addr = last_location;
+
+  // assert(generated_location == last_location);
+
+  // mem_loc_t l = (mem_loc_t)EndTraceFallthrough();
+  // continue_program(l);
 }
 
 
@@ -1457,4 +1561,17 @@ void Tracer::run_debugger() {
   //compiler.hlt();
   compiler.finalize();
   continue_program(current_location);
+}
+
+void Tracer::kill_trace() {
+
+  assert(0); // TODO:
+
+}
+
+void Tracer::blacklist_function() {
+  assert(!method_address_stack.empty());
+  // blacklist this current method
+  manager->do_not_trace_method((void*)method_address_stack.back());
+  kill_trace();
 }

@@ -8,4 +8,6 @@
 
 #define CONF_VERBOSE
 
+#define CONF_GLOBAL_ABORT
+
 #endif // REDMAGIC_CONFIG_H_

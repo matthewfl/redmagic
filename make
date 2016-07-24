@@ -16,9 +16,10 @@ GIT_VERSION = Shell('git describe --always --long --dirty --abbrev=12', silent=T
 
 C_FLAGS = (
     '-fPIC '
-    '-I ./deps/ '
+    #'-mgeneral-regs-only '
     '-ggdb '
     '-O0 '
+    '-I ./deps/ '
     '-I ./deps/udis86 '
     '-I ./deps/asmjit/src '
 )
@@ -164,15 +165,18 @@ def deps():
     if not os.path.isdir('build'):
         Shell('mkdir -p build')
     if not os.path.isfile('deps/udis86/libudis86/.libs/libudis86.so') or not os.path.isfile('deps/udis86/libudis86/itab.h'):
-          Shell('cd deps/udis86 && ./autogen.sh && PYTHON=`which python2` ./configure && make', shell=True)
+          Shell('cd deps/udis86 && ./autogen.sh && PYTHON=`which python2` ./configure && '
+                #"sed -i '/^CFLAGS\ =/ s/$/\ \-mgeneral\-regs\-only/' Makefile &&"
+                'make V=1', shell=True)
     if not os.path.isfile('build/asmjit/libasmjit.so'):
         Shell('mkdir -p build/asmjit')
         asm_flags = ''  # -DASMJIT_ALLOC=test123
+        cm_args = '-DASMJIT_DISABLE_COMPILER=1 -DASMJIT_CFLAGS=\'==REPLACE_ME==\' -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc'
         if RELEASE:
-            Shell('cd build/asmjit && cmake ../../deps/asmjit -DASMJIT_DISABLE_COMPILER=1 -DASMJIT_CFLAGS=\'==REPLACE_ME==\' -DASMJIT_RELEASE=1', shell=True)
+            Shell('cd build/asmjit && cmake ../../deps/asmjit {} -DASMJIT_RELEASE=1'.format(cm_args), shell=True)
             asm_flags += '\-O2'
         else:
-            Shell('cd build/asmjit && cmake ../../deps/asmjit -DASMJIT_DISABLE_COMPILER=1 -DASMJIT_CFLAGS=\'==REPLACE_ME==\' -DASMJIT_DEBUG=1', shell=True)
+            Shell('cd build/asmjit && cmake ../../deps/asmjit {} -DASMJIT_DEBUG=1'.format(cm_args), shell=True)
             asm_flags += '\-ggdb'
         Shell('sed -i s/==REPLACE_ME==/{}/ build/asmjit/CMakeFiles/asmjit.dir/flags.make'.format(asm_flags), shell=True)
         Shell('cd build/asmjit && make VERBOSE=1', shell=True)

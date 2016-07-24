@@ -17,6 +17,7 @@ namespace redmagic {
   struct register_info {
     int8_t index;
     int8_t size;
+    ud_type ud_reg_type;
   };
 
   class AlignedInstructions {
@@ -266,10 +267,9 @@ namespace redmagic {
     register_info r;
     r.index = ud_register_to_sys(t);
     r.size = ud_register_to_size(t);
+    r.ud_reg_type = t;
     return r;
   }
-
-
 
   static auto& get_asm_register_from_rinfo(register_info r) {
     // take the sys struct register id and convert it to asmjit
@@ -375,6 +375,29 @@ namespace redmagic {
     assert(0);
   }
 
+  // this function takes a function that is provided the register type since asmjit uses multiple types
+  // and they can't be corressed together
+  template<typename func_t>
+  auto get_asm_register_from_ud(ud_type t, func_t func) {
+    using namespace asmjit;
+    using namespace x86;
+    switch(t) {
+    case UD_R_AL ... UD_R_GS:
+      return func(get_asm_register_from_rinfo(ud_register_to_rinfo(t)));
+    case UD_R_XMM0 ... UD_R_XMM15:
+      return func(x86RegData.xmm[t - UD_R_XMM0]);
+    case UD_R_MM0 ... UD_R_MM7:
+      return func(x86RegData.mm[t - UD_R_MM0]);
+    case UD_R_ST0 ... UD_R_ST7:
+      return func(x86RegData.fp[t - UD_R_ST0]);
+    case UD_R_YMM0 ... UD_R_YMM15:
+      return func(x86RegData.ymm[t - UD_R_YMM0]);
+    case UD_NONE:
+    default: assert(0);
+    }
+  }
+
+  // asmjit::Operand get_asm_op_from_ud(ud_operand_t *opr);
 
 }
 

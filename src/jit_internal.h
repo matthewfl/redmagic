@@ -51,11 +51,11 @@ namespace redmagic {
     Manager();
 
     void* begin_trace(void *id, void *ret_addr);
-    void* end_trace(void *id);
+    void* end_trace(void *id, void *ret_addr);
     void* jump_to_trace(void *id);
 
     void* backwards_branch(void *id, void *ret_addr);
-    void* fellthrough_branch(void*);
+    void* fellthrough_branch(void *id, void *ret_addr);
 
     void ensure_not_traced();
 
@@ -110,6 +110,7 @@ namespace redmagic {
     bool is_temp_disabled = false;
     bool is_traced = false;
     bool is_compiled = false;
+    bool did_abort = false;
   };
 
   //extern thread_local std::vector<tracer_stack_state> trace_return_addr;
@@ -225,10 +226,10 @@ namespace redmagic {
     }
 
   public:
-    std::mutex generation_mutex;
-    // std::unique_lock<std::mutex> generation_lock = std::unique_lock<std::mutex>(_generation_mutex);
+    // std::mutex generation_mutex;
+    // // std::unique_lock<std::mutex> generation_lock = std::unique_lock<std::mutex>(_generation_mutex);
 
-    CodeBuffer *_next;
+    // CodeBuffer *_next;
 
   private:
     uint8_t *buffer;

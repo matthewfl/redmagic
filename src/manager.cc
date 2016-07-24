@@ -13,7 +13,7 @@ namespace redmagic {
   //thread_local void *temp_disable_resume = nullptr;
   //thread_local bool is_running_compiled = false;
 
-  thread_local bool protected_malloc = false;
+  thread_local bool protected_malloc = true;
 
   Manager *manager = nullptr;
 
@@ -29,26 +29,43 @@ namespace redmagic {
   thread_local uint32_t this_thread_id = 0;
 }
 
+class UnprotectMalloc {
+private:
+  bool pstate;
+public:
+  UnprotectMalloc() {
+    pstate = protected_malloc;
+    protected_malloc = false;
+  }
+  ~UnprotectMalloc() {
+    protected_malloc = pstate;
+  }
+};
 
 
 extern "C" void* red_user_force_begin_trace(void *id, void *ret_addr) {
+  UnprotectMalloc upm;
   return manager->begin_trace(id, ret_addr);
 }
 
 extern "C" void* red_user_force_end_trace(void *id, void *ret_addr) {
-  return manager->end_trace(id);
+  UnprotectMalloc upm;
+  return manager->end_trace(id, ret_addr);
 }
 
 extern "C" void* red_user_force_jump_to_trace(void *id, void *ret_addr) {
+  UnprotectMalloc upm;
   return manager->jump_to_trace(id);
 }
 
 extern "C" void* red_user_backwards_branch(void *id, void *ret_addr) {
+  UnprotectMalloc upm;
   return manager->backwards_branch(id, ret_addr);
 }
 
 extern "C" void* red_user_fellthrough_branch(void *id, void *ret_addr) {
-  return manager->fellthrough_branch(id);
+  UnprotectMalloc upm;
+  return manager->fellthrough_branch(id, ret_addr);
 }
 
 extern "C" void* red_user_ensure_not_traced(void *_, void *ret_addr) {
@@ -58,15 +75,18 @@ extern "C" void* red_user_ensure_not_traced(void *_, void *ret_addr) {
 }
 
 extern "C" void* red_user_temp_disable(void *_, void *ret_addr) {
+  UnprotectMalloc upm;
   return manager->temp_disable(ret_addr);
   //return NULL;
 }
 
 extern "C" void* red_user_is_traced(void *_, void *ret_addr) {
+  UnprotectMalloc upm;
   return manager->is_traced_call();
 }
 
 extern "C" void* red_user_temp_enable(void *_, void *ret_addr) {
+  UnprotectMalloc upm;
   return manager->temp_enable(ret_addr);
   //assert(0);
   //return NULL;
@@ -75,6 +95,7 @@ extern "C" void* red_user_temp_enable(void *_, void *ret_addr) {
 extern "C" void *__real_malloc(size_t);
 
 extern "C" void redmagic_start() {
+  UnprotectMalloc upm;
   red_printf("Using redmagic jit by Matthew Francis-Landau <matthew@matthewfl.com>\n");
   if(manager != nullptr) {
     red_printf("redmagic_start called twice");
@@ -89,10 +110,12 @@ extern "C" void redmagic_start() {
 }
 
 extern "C" void redmagic_do_not_trace_function(void *function_pointer) {
+  UnprotectMalloc upm;
   manager->do_not_trace_method(function_pointer);
 }
 
 extern "C" void redmagic_disable_branch(void *id) {
+  UnprotectMalloc upm;
   manager->disable_branch(id);
 }
 
@@ -170,9 +193,6 @@ uint32_t Manager::get_thread_id() {
 }
 
 void* Manager::begin_trace(void *id, void *ret_addr) {
-
-  protected_malloc = false;
-
   branch_info *info = &branches[id];
   if(info->disabled)
     return NULL; // do not trace this loop
@@ -198,7 +218,7 @@ void* Manager::begin_trace(void *id, void *ret_addr) {
     auto new_head = push_tracer_stack();
 
     //assert(tracer == nullptr);
-    assert(info->tracer == nullptr);
+    assert(info->tracer == nullptr || info->tracer->did_abort);
 
     //auto buff = make_shared<CodeBuffer>(4 * 1024 * 1024);
     auto buff = CodeBuffer::CreateBuffer(1024 * 1024);
@@ -217,41 +237,38 @@ void* Manager::begin_trace(void *id, void *ret_addr) {
     ret = l->Start(trace_pc);
     new_head->is_traced = true;
     info->starting_point = l->get_start_location();
-    protected_malloc = true;
   }
   //return NULL;
   return ret;
 }
 
-void* Manager::end_trace(void *id) {
+extern "C" void* red_end_trace(mem_loc_t);
+
+void* Manager::end_trace(void *id, void *ret_addr) {
   void *ret;
   Tracer *l;
   auto head = get_tracer_head();
   branch_info *info = &branches[id];
+  if(!head->tracer || head->did_abort) {
+    // then we weren't actually running on the tracer
+    return red_end_trace((mem_loc_t)ret_addr);
+  }
   assert(!info->disabled);
   assert(head->trace_id == id);
   assert(head->tracer == info->tracer);
   l = head->tracer;
 
-
+  // poping of the head will tracer stack will be taken care of by the tracer
   // ret is going to be the address of the normal execution
   ret = l->EndTraceFallthrough();
-  // if(head->resume_addr != nullptr) {
-  //   // if the next element contains a
-  //   ret = head->resume_addr;
-  //   head->resume_addr = nullptr;
-  // }
-  //trace_id = nullptr;
-  //is_traced = false;
-  l->tracing_from.store(0);
+  //l->tracing_from.store(0); // not needed
 
   info->tracer = head->tracer = nullptr;
 
   Tracer *expected = nullptr;
   if(!free_tracer_list.compare_exchange_strong(expected, l)) {
     // failled to save the tracer to the free list head
-    // TODO: the tracer holds the only refernece to the code buff which is in a shared pointer, so can't delete.....
-    //delete l;
+    delete l;
   }
 
 
@@ -269,11 +286,24 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
   // ignore
   if(id == nullptr)
     return NULL;
+
   //return NULL;
   auto head = get_tracer_head();
   if(head->is_traced) {
     if(id == head->trace_id) {
       auto info = &branches[id];
+#ifdef CONF_GLOBAL_ABORT
+      if(head->did_abort) {
+        red_printf("starting a previously aborted trace\n");
+        return info->starting_point;
+      }
+
+      if(head->is_compiled) {
+        // then there must have been an abort that has us here
+        return info->starting_point;
+      }
+#endif
+
       assert(!head->is_compiled);
       assert(head->tracer == info->tracer);
       void *ret = head->tracer->EndTraceLoop();
@@ -284,8 +314,7 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
       Tracer *expected = nullptr;
       if(!free_tracer_list.compare_exchange_strong(expected, l)) {
         // failled to save the tracer to the free list head
-        // TODO: the tracer holds the only refernece to the code buff which is in a shared pointer, so can't delete.....
-        //delete l;
+        delete l;
       }
 
       // We are continuing the loop so there is no need to check the parent stack frame
@@ -312,7 +341,15 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
 
       // TODO: if this aborted, then need to make this have written the resume block at the bottom and
       if(info->tracer->did_abort) {
-        red_printf("previous attempt aborted\n");
+        red_printf("previous attempt aborted %x\n", id);
+#ifdef CONF_GLOBAL_ABORT
+        auto head = push_tracer_stack();
+        head->is_compiled = true;
+        head->is_traced = true;
+        head->trace_id = id;
+        head->did_abort = true;
+        return info->starting_point;
+#endif
       }
       return NULL;
     }
@@ -336,13 +373,14 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
   return NULL;
 }
 
-void* Manager::fellthrough_branch(void *id) {
+void* Manager::fellthrough_branch(void *id, void *ret_addr) {
   // ignore
   if(id == nullptr)
     return NULL;
+
   auto head = get_tracer_head();
   if(head->trace_id == id && head->is_traced) {
-    return end_trace(id);
+    return end_trace(id, ret_addr);
     // branch_info *info = &branches[id];
     // void *ret;
     // Tracer *l = head->tracer;
@@ -367,11 +405,10 @@ void* Manager::temp_disable(void *resume_pc) {
   assert(!head->is_temp_disabled);
   head->is_temp_disabled = true;
   void *ret = NULL;
-  assert(!head->is_traced || head->tracer);
-  if(head->tracer) {
+  assert(!head->is_traced || head->tracer || head->did_abort);
+  if(head->tracer && !head->tracer->did_abort) {
     // this will push the stack
     ret = head->tracer->TempDisableTrace();
-    protected_malloc = false;
   } else {
     push_tracer_stack();
   }
@@ -385,9 +422,8 @@ void* Manager::temp_enable(void *resume_pc) {
   assert(head->is_temp_disabled);
   head->is_temp_disabled = false;
   void *ret = NULL;
-  if(head->tracer) {
+  if(head->tracer && !head->tracer->did_abort) {
     head->tracer->TempEnableTrace(resume_pc);
-    protected_malloc = true;
   }
   if(head->resume_addr != nullptr) {
     ret = head->resume_addr;
@@ -415,6 +451,10 @@ void* Manager::temp_enable(void *resume_pc) {
 void* Manager::is_traced_call() {
   auto head = get_tracer_head();
   if(head->is_traced) {
+#ifdef CONF_GLOBAL_ABORT
+    if(!head->tracer || head->tracer->did_abort) // this trace got aborted somehow, but still return that we are "in the tracer"
+      return (void*)1;
+#endif
     return head->tracer->ReplaceIsTracedCall();
   }
   return NULL;

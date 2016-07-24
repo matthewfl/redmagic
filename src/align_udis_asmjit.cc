@@ -38,6 +38,47 @@ namespace {
   } _do_alignment_inst;
 }
 
+// namespace redmagic {
+//   // template<typename T>
+//   // int gg(T i) {
+//   //   return 0;
+//   // }
+
+//   asmjit::Operand get_asm_op_from_ud(ud_operand_t *opr) {
+//     using namespace asmjit;
+//     using namespace x86;
+//     // it is like I am programming node
+//     switch(opr->type) {
+//     case UD_OP_REG: {
+//       return get_asm_register_from_ud(opr->base, [&](auto base_reg) -> asmjit::Operand {
+//           return base_reg;
+//         });
+//     }
+//     case UD_OP_MEM: {
+//       uint64_t offset;
+//       switch(opr->offset) {
+//       case 8: offset = opr->lval.sbyte; break;
+//       case 16: offset = opr->lval.sword; break;
+//       case 32: offset = opr->lval.sdword; break;
+//       case 64: offset = opr->lval.sqword; break;
+//       default: assert(0);
+//       }
+//       if(opr->base != UD_NONE) {
+//         return get_asm_register_from_ud(opr->base, [&](auto base_reg) -> asmjit::Operand {
+//             if(opr->index != UD_NONE) {
+//               return get_asm_register_from_ud(opr->index, [&](auto index_reg) -> asmjit::Operand {
+
+//                 });
+//             } else {
+//               return word_ptr(base_reg, offset);
+//             }
+//           });
+//       }
+//     }
+//     }
+//   }
+// }
+
 enum X86InstId AlignedInstructions::get_asm_mnem(enum ud_mnemonic_code mnem) {
   return aligned_instructions[mnem].asm_code;
 }
@@ -47,6 +88,15 @@ AlignedInstructions::AlignedInstructions(ud_t *disassm) {
   ud_mnem = ud_insn_mnemonic(disassm);
   pc = ud_insn_off(disassm);
   len = ud_insn_len(disassm);
+
+  // assert(disassm->pfx_rex == UD_NONE);
+  assert(disassm->pfx_seg == UD_NONE);
+  assert(disassm->pfx_opr == UD_NONE);
+  assert(disassm->pfx_adr == UD_NONE);
+  assert(disassm->pfx_lock == UD_NONE);
+  assert(disassm->pfx_rep == UD_NONE);
+  assert(disassm->pfx_repe == UD_NONE);
+  assert(disassm->pfx_repne == UD_NONE);
 
   for(int i = 0;; i++) {
     const ud_operand_t *opr = ud_insn_opr(disassm, i);
@@ -142,8 +192,16 @@ const asmjit::Operand AlignedInstructions::get_asm_op(unsigned int i) {
     return imm(info->imm_value);
   case UD_OP_JIMM:
     return imm_u(info->address);
-  case UD_OP_REG:
-    return get_asm_register_from_rinfo(info->register_i);
+  case UD_OP_REG: {
+    if(info->register_i.index == -1) {
+      // then this is a special ud register type which won't be referencing memory so we don't care
+      return get_asm_register_from_ud(info->register_i.ud_reg_type, [&](auto reg) -> asmjit::Operand {
+          return reg;
+        });
+    } else {
+      return get_asm_register_from_rinfo(info->register_i);
+    }
+  }
   case UD_OP_MEM: {
     if(info->base_register.index != -1) {
       if(info->index_register.index == -1) {

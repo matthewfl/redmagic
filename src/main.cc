@@ -49,6 +49,8 @@ int main(int argc, char* argv[]) {
 
   int cond_var = 0;
 
+  float a = 1.2;
+
   while(1) {
     switch(program[pc]) {
     case PRINT_NUM:
@@ -56,6 +58,7 @@ int main(int argc, char* argv[]) {
       cout << program[pc + 1] << endl;
       redmagic_temp_enable();
       //printf("%i\n", program[pc + 1]);
+      a *= 1.001;
       pc += 2;
       break;
     case JUMP_BACK:
@@ -80,7 +83,7 @@ int main(int argc, char* argv[]) {
       pc += 2;
       break;
     case EXIT:
-      cout << "hitting normal exit case\n";
+      cout << "hitting normal exit case\n" << a;
       exit(0);
     default:
       exit(-1);

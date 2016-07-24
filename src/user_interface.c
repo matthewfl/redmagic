@@ -20,8 +20,8 @@ __asm__("jmp_rax: \n"
           "redmagic_" #method ": \n"                 \
           "movq 0(%rsp), %rsi \n"                    \
           "call red_user_" #method "@plt \n"         \
-          "test %rax, %rax \n"                       \
-          "jnz jmp_rax \n"                           \
+          "cmp $5, %rax \n"                          \
+          "jg jmp_rax \n"                            \
           "ret \n"                                   \
           );
 

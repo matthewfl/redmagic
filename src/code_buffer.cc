@@ -44,7 +44,7 @@ CodeBuffer* CodeBuffer::CreateBuffer(size_t size) {
   if(buffer == MAP_FAILED) {
     perror("failed to mmap buffer");
   }
-  memset(buffer, 0, size);
+  memset(buffer, 0xCC, size); // write int3 so that if we end up here we should alert the debugger
 
   CodeBuffer* ret = new CodeBuffer();
   owning_code_buffers.push_back(ret);
