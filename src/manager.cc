@@ -2,6 +2,7 @@
 #include "tracer.h"
 
 #include <dlfcn.h>
+#include <stdlib.h>
 
 using namespace redmagic;
 using namespace std;
@@ -27,6 +28,10 @@ namespace redmagic {
   thread_local vector<tracer_stack_state> threadl_tracer_stack;
 
   thread_local uint32_t this_thread_id = 0;
+
+#ifdef CONF_GLOBAL_ABORT
+  extern long global_icount_abort;
+#endif
 }
 
 class UnprotectMalloc {
@@ -70,7 +75,8 @@ extern "C" void* red_user_fellthrough_branch(void *id, void *ret_addr) {
 
 extern "C" void* red_user_ensure_not_traced(void *_, void *ret_addr) {
   // TODO:
-  assert(!manager->get_tracer_head()->is_traced);
+  auto head = manager->get_tracer_head();
+  assert(!head->is_traced || head->did_abort); // TODO: better manage abort
   return NULL;
 }
 
@@ -107,6 +113,12 @@ extern "C" void redmagic_start() {
   redmagic::manager = new Manager();
   // int r = mprotect(p, 4*1024, PROT_NONE);
   // assert(!r);
+
+#ifdef CONF_GLOBAL_ABORT
+  char *abort_v = getenv("REDMAGIC_GLOBAL_ABORT");
+  if(abort_v)
+    redmagic::global_icount_abort = atol(abort_v);
+#endif
 }
 
 extern "C" void redmagic_do_not_trace_function(void *function_pointer) {
@@ -306,6 +318,7 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
 
       assert(!head->is_compiled);
       assert(head->tracer == info->tracer);
+      assert(!info->disabled);
       void *ret = head->tracer->EndTraceLoop();
       head->is_compiled = true;
       Tracer *l = head->tracer;

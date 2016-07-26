@@ -92,5 +92,10 @@ red_asm_start_nested_trace:
   jmp *%rax
 
 
+testing:
+  jmp 0x123fa(,%r12,8)
+  mov 0xfafafa(,%r12,8), %rax
+
+
 // we don't need executable stack
   .section .note.GNU-stack,"",%progbits

@@ -71,12 +71,12 @@
   // 208 == 0xd0
   // extra registers....
   // make sure that the region we are going to save these too is aligned to 16 byte boundary
-  mov %rsp, %rax
+  movq %rsp, %rax
   // yes this is add instead of a subtract even though this is on the stack (we are "lower" on the stack then the regs struct)
   //add $16, %rax // just include this add in the offset of fxsaveq
   and $~15, %rax
 
-  fxsaveq 0xf0(%rax)
+  fxsaveq 0x100(%rax)
 
   .endm
 
@@ -84,9 +84,9 @@
   .macro m_pop_all_regs
 
   // extra registers
-  mov %rsp, %rax
+  movq %rsp, %rax
   and $~15, %rax
-  fxrstorq 0xf0(%rax)
+  fxrstorq 0x100(%rax)
 
   // eflags
   movq 144(%rsp), %r14

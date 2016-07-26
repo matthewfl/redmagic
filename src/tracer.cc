@@ -244,6 +244,7 @@ extern "C" void* red_branch_to_sub_trace(void *resume_addr, void *sub_trace_id, 
     // maybe treat this as a temp disabled inner loop
   }
   assert(info->starting_point != nullptr);
+  assert(!info->disabled);
   auto new_head = manager->push_tracer_stack();
   new_head->is_traced = true;
   new_head->trace_id = sub_trace_id;
@@ -304,6 +305,8 @@ void* Tracer::Start(void *start_addr) {
 
     did_abort = true;
     manager->get_tracer_head()->did_abort = true;
+    CodeBuffer::Relase(buffer);
+    buffer = nullptr;
     return start_addr;
   }
 #endif
@@ -405,7 +408,7 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
       dladdr((void*)ud_insn_off(&disassm), &dlinfo);
       auto ins_loc = ud_insn_off(&disassm);
 
-      red_printf("[%10lu %8i %#016lx] \t%-35s %-20s %s\n", global_icount, icount, ins_loc, ud_insn_asm(&disassm), ud_insn_hex(&disassm), dlinfo.dli_sname);
+      red_printf("[%10lu %8i %#016lx] \t%-38s %-20s %s\n", global_icount, icount, ins_loc, ud_insn_asm(&disassm), ud_insn_hex(&disassm), dlinfo.dli_sname);
 #endif
 
       //fprintf(stderr, );
@@ -624,13 +627,16 @@ void Tracer::finish_patch() {
 
 extern "C" void* red_asm_resume_eval_block(void*, void*);
 
+float float_a = 9.4;
+
 void Tracer::continue_program(mem_loc_t resume_loc) {
+  red_printf("==> %#016lx\n", resume_loc);
   assert(regs_struct->rsp - TRACE_STACK_OFFSET == (register_t)regs_struct);
   regs_struct->rsp += move_stack_by;
   move_stack_by = 0;
   *((register_t*)(regs_struct->rsp - TRACE_RESUME_ADDRESS_OFFSET)) = resume_loc;
   regs_struct = (struct user_regs_struct*)red_asm_resume_eval_block(&resume_struct, regs_struct);
-
+  float_a *= 1.000001;
 }
 
 
@@ -1424,7 +1430,8 @@ void Tracer::replace_rip_instruction() {
     /*... UD_Imovzx:*/
   case UD_Imov:
   case UD_Imovsxd:
-  case UD_Imovss: {
+  case UD_Imovss:
+  case UD_Imovsd: {
     const ud_operand_t *opr1 = ud_insn_opr(&disassm, 0); // dest address
     const ud_operand_t *opr2 = ud_insn_opr(&disassm, 1); // source address
     assert(opr1 != NULL && opr2 != NULL);

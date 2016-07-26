@@ -225,7 +225,8 @@ const asmjit::Operand AlignedInstructions::get_asm_op(unsigned int i) {
       assert(info->index_register.index != -1);
       int scale = 0;
       switch(info->index_scale) {
-      case  0: scale = 0; break;
+        //case  0: scale = 0; break;
+      case  1: scale = 0; break;
       case  2: scale = 1; break;
       case  4: scale = 2; break;
       case  8: scale = 3; break;
@@ -234,7 +235,7 @@ const asmjit::Operand AlignedInstructions::get_asm_op(unsigned int i) {
       case 64: scale = 6; break;
       default: assert(0);
       }
-      return x86::ptr_abs(0, get_asm_register_from_rinfo(info->index_register), scale, info->offset);
+      return x86::ptr_abs((Ptr)info->offset, get_asm_register_from_rinfo(info->index_register), scale, 0);
     }
   }
   default:

@@ -3,4 +3,4 @@
 	url = https://github.com/vmt/udis86.git
 [submodule "deps/asmjit"]
 	path = deps/asmjit
-	url = https://github.com/kobalicek/asmjit.git
+	url = git@10.7.0.1:u/mfl/asmjit
