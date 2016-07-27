@@ -408,7 +408,10 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
       dladdr((void*)ud_insn_off(&disassm), &dlinfo);
       auto ins_loc = ud_insn_off(&disassm);
 
-      red_printf("[%10lu %8i %#016lx] \t%-38s %-20s %s\n", global_icount, icount, ins_loc, ud_insn_asm(&disassm), ud_insn_hex(&disassm), dlinfo.dli_sname);
+      if(dlinfo.dli_sname != nullptr)
+        red_printf("[%10lu %8i %#016lx] \t%-38s %-20s %s\n", global_icount, icount, ins_loc, ud_insn_asm(&disassm), ud_insn_hex(&disassm), dlinfo.dli_sname);
+      else
+        red_printf("[%10lu %8i %#016lx] \t%-38s %-20s lib=%s\n", global_icount, icount, ins_loc, ud_insn_asm(&disassm), ud_insn_hex(&disassm), dlinfo.dli_fname);
 #endif
 
       //fprintf(stderr, );
@@ -419,9 +422,9 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
         if(jmp_info.is_local_jump) {
           // there is a chance that we can directly inline this if this is a short loop
           if(jmp_info.local_jump_offset < 0) {
-            if(last_location - current_location  > -jmp_info.local_jump_offset) {
+            if(udis_loc - current_location  > -jmp_info.local_jump_offset) {
               // this is a backwards branch that is going an acceptable distance
-              continue;
+              goto instruction_approved;
             }
           } else {
             // this is a forward branch
@@ -434,7 +437,7 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
             }
             if(udis_loc + jmp_info.local_jump_offset > local_jump_min_addr)
               local_jump_min_addr = udis_loc + jmp_info.local_jump_offset;
-            continue;
+            goto instruction_approved;
           }
 
         }
@@ -457,6 +460,7 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
       if(debug_check_abort())
         goto run_instructions;
 #endif
+    instruction_approved:
       last_location = udis_loc;
       if(local_jump_min_addr && udis_loc > local_jump_min_addr) {
         // yay, we are able to direclty inline this jump
@@ -1287,14 +1291,16 @@ void Tracer::evaluate_instruction() {
     } else {
 
       // TODO: check that the register is pointing at the same location in memory
-      SimpleCompiler compiler(buffer);
-      AlignedInstructions ali(&disassm);
       auto v = get_opr_value(opr1);
-      compiler.add_used_registers(ali.registers_used());
       call_pc = v.is_ptr ? *v.address_ptr : v.address;
-      auto r_cb = compiler.TestOperand(ud_insn_off(&disassm), ali.get_asm_op(0), call_pc);
-      auto written = compiler.finalize();
-      r_cb.replace_stump<uint64_t>(0xfafafafafafafafa, written.getRawBuffer());
+      if(opr1->base != UD_R_RIP) {
+        SimpleCompiler compiler(buffer);
+        AlignedInstructions ali(&disassm);
+        compiler.add_used_registers(ali.registers_used());
+        auto r_cb = compiler.TestOperand(ud_insn_off(&disassm), ali.get_asm_op(0), call_pc);
+        auto written = compiler.finalize();
+        r_cb.replace_stump<uint64_t>(0xfafafafafafafafa, written.getRawBuffer());
+      }
 
 
       // opr_value ta = get_opr_value(opr1);
