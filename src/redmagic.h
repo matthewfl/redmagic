@@ -44,6 +44,11 @@ void redmagic_disable_branch(void *);
 // return 0 if not traced, non zero otherwise
 unsigned long redmagic_is_traced(void);
 
+// A merge block allows you to have some section of code that performs branches but at the end of the block merge back into the same instruction stream
+// useful for things like reference counting where hitting zero will not have a significant impact on the following control flow
+void redmagic_begin_merge_block(void);
+void redmagic_end_merge_block(void);
+
 #ifdef __cplusplus
 }
 

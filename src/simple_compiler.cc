@@ -150,7 +150,7 @@ void SimpleCompiler::SetRegister(int reg, register_t val) {
   mov(get_register(reg), imm_u(val));
 }
 
-CodeBuffer SimpleCompiler::TestRegister(mem_loc_t resume_pc, int reg, register_t val) {
+CodeBuffer SimpleCompiler::TestRegister(mem_loc_t resume_pc, int reg, register_t val, mem_loc_t *merge_addr) {
   auto r = get_register(reg);
   asmjit::X86GpReg scr;
   if(val > 0x7fffffff)
@@ -164,6 +164,8 @@ CodeBuffer SimpleCompiler::TestRegister(mem_loc_t resume_pc, int reg, register_t
 
   auto resume_cb = resume_block.finalize_bottom();
   set_label_address(failure, resume_cb.getRawBuffer());
+
+  do_merge_addr(resume_cb, merge_addr);
 
   pushf();
   if(val > 0x7fffffff) {
@@ -181,7 +183,7 @@ CodeBuffer SimpleCompiler::TestRegister(mem_loc_t resume_pc, int reg, register_t
   return resume_cb;
 }
 
-CodeBuffer SimpleCompiler::TestMemoryLocation(mem_loc_t resume_pc, mem_loc_t where, register_t val) {
+CodeBuffer SimpleCompiler::TestMemoryLocation(mem_loc_t resume_pc, mem_loc_t where, register_t val, mem_loc_t *merge_addr) {
   //Label success = newLabel();
 
   Label failure = newLabel();
@@ -197,6 +199,8 @@ CodeBuffer SimpleCompiler::TestMemoryLocation(mem_loc_t resume_pc, mem_loc_t whe
 
   auto resume_cb = resume_block.finalize_bottom();
   set_label_address(failure, resume_cb.getRawBuffer());
+
+  do_merge_addr(resume_cb, merge_addr);
 
   pushf();
   mov(scr, imm_ptr(where));
@@ -214,7 +218,7 @@ CodeBuffer SimpleCompiler::TestMemoryLocation(mem_loc_t resume_pc, mem_loc_t whe
   return resume_cb;
 }
 
-CodeBuffer SimpleCompiler::TestOperand(mem_loc_t resume_pc, const asmjit::Operand& opr, register_t val) {
+CodeBuffer SimpleCompiler::TestOperand(mem_loc_t resume_pc, const asmjit::Operand& opr, register_t val, mem_loc_t *merge_addr) {
   Label failure = newLabel();
   asmjit::X86GpReg scr, scr2;
   scr = get_scratch_register();
@@ -231,6 +235,7 @@ CodeBuffer SimpleCompiler::TestOperand(mem_loc_t resume_pc, const asmjit::Operan
 
   auto resume_cb = resume_block.finalize_bottom();
   set_label_address(failure, resume_cb.getRawBuffer());
+  do_merge_addr(resume_cb, merge_addr);
 
   pushf();
   // mov(src, opr);
@@ -262,8 +267,11 @@ uint64_t* SimpleCompiler::MakeCounter() {
   // mov(x86::ptr(label), scr);
 
   // TODO: make this add to this location
-  add(x86::ptr(label), 1);
-  assert(0);
+  //auto op = x86::ptr_abs((Ptr)cptr);
+  auto op = x86::ptr(label);
+  op.setSize(8);
+  add(op, 1);
+  //assert(0);
 
   return cptr;
 }
@@ -303,8 +311,8 @@ void SimpleCompiler::Push64bitValue(uint64_t value) {
 
 }
 
-CodeBuffer SimpleCompiler::ConditionalJump(mem_loc_t resume_pc, enum asmjit::X86InstId mnem) {
-  CodeBuffer rb = MakeResumeTraceBlock(resume_pc);
+CodeBuffer SimpleCompiler::ConditionalJump(mem_loc_t resume_pc, enum asmjit::X86InstId mnem, mem_loc_t *merge_addr) {
+  CodeBuffer rb = MakeResumeTraceBlock(resume_pc, merge_addr);
   auto label = newLabel();
   set_label_address(label, rb.getRawBuffer());
   emit(mnem, label);
@@ -314,11 +322,20 @@ CodeBuffer SimpleCompiler::ConditionalJump(mem_loc_t resume_pc, enum asmjit::X86
 
 extern "C" void red_asm_restart_trace();
 
-CodeBuffer SimpleCompiler::MakeResumeTraceBlock(mem_loc_t resume_pc) {
+CodeBuffer SimpleCompiler::MakeResumeTraceBlock(mem_loc_t resume_pc, mem_loc_t *merge_addr) {
   SimpleCompiler resume_block(buffer);
   //resume_block.clobbered_registers |= clobbered_registers;
   resume_block.ResumeBlockJump(resume_pc);
-  return resume_block.finalize_bottom();
+  auto ret = resume_block.finalize_bottom();
+  do_merge_addr(ret, merge_addr);
+  return ret;
+}
+
+void SimpleCompiler::do_merge_addr(CodeBuffer &buff, mem_loc_t *merge_addr) {
+  mem_loc_t* ma = buff.find_stump<mem_loc_t>(0xfbfbfbfbfbfbfbfb);
+  // make a linked list out of address where we are going to write this merge address
+  *ma = *merge_addr;
+  *merge_addr = (mem_loc_t)ma;
 }
 
 void SimpleCompiler::ResumeBlockJump(mem_loc_t resume_pc) {
@@ -330,12 +347,14 @@ void SimpleCompiler::ResumeBlockJump(mem_loc_t resume_pc) {
   bind(label_top);
   mov(x86::ptr(x86::rsp, -TRACE_STACK_OFFSET + 216), x86::r10);
   mov(x86::ptr(x86::rsp, -TRACE_STACK_OFFSET + 224), x86::r9);
+  mov(x86::ptr(x86::rsp, -TRACE_STACK_OFFSET + 232), x86::r8);
   mov(x86::r10, imm_u(resume_pc));
   // TODO: have this load the address of the instruction that jumped here instead of just this block
   // this will allow for it to easily write in a direct jump, as being designed now, we will have to redirect the jump through this indirection
   // so first conditional jump followed by direct jump
   // also, this will not work with concurrent threads
   lea(x86::r9, x86::ptr(label));
+  mov(x86::r8, imm_u(0xfbfbfbfbfbfbfbfb));
   jmp(imm_ptr(&red_asm_restart_trace));
 
   // for identifying which instruction it jumped from

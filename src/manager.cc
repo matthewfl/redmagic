@@ -98,6 +98,16 @@ extern "C" void* red_user_temp_enable(void *_, void *ret_addr) {
   //return NULL;
 }
 
+extern "C" void* red_user_begin_merge_block(void *_, void *ret_addr) {
+  UnprotectMalloc upm;
+  return manager->begin_merge_block();
+}
+
+extern "C" void* red_user_end_merge_block(void *_, void *ret_addr) {
+  UnprotectMalloc upm;
+  return manager->end_merge_block();
+}
+
 extern "C" void *__real_malloc(size_t);
 
 extern "C" void redmagic_start() {
@@ -166,7 +176,10 @@ static const char *avoid_inlining_methods[] = {
   "redmagic_temp_enable",
   "redmagic_is_traced",
   "redmagic_disable_branch",
-  "redmagic_do_not_trace_function"
+  "redmagic_do_not_trace_function",
+  "redmagic_begin_merge_block",
+  "redmagic_end_merge_block",
+  NULL,
 };
 
 // namespace redmagic {
@@ -249,6 +262,7 @@ void* Manager::begin_trace(void *id, void *ret_addr) {
     ret = l->Start(trace_pc);
     new_head->is_traced = true;
     info->starting_point = l->get_start_location();
+    info->trace_loop_counter = l->get_loop_counter();
   }
   //return NULL;
   return ret;
@@ -459,6 +473,22 @@ void* Manager::temp_enable(void *resume_pc) {
   // }
   // is_temp_disabled = false;
   // return NULL;
+}
+
+void* Manager::begin_merge_block() {
+  auto head = get_tracer_head();
+  if(head->tracer) {
+    return head->tracer->BeginMergeBlock();
+  }
+  return NULL;
+}
+
+void* Manager::end_merge_block() {
+  auto head = get_tracer_head();
+  if(head->tracer) {
+    return head->tracer->EndMergeBlock();
+  }
+  return NULL;
 }
 
 void* Manager::is_traced_call() {

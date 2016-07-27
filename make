@@ -83,7 +83,7 @@ def link():
     #     **dict(globals(), **locals())
     # ))
     udis_libs = ' '.join(glob.glob('deps/udis86/libudis86/.libs/*.o'))
-    # we are not using the compiler interface, just the assembler, would be nice if we could strip all the functions
+    # we are not using the compiler interface, just the assembler
     asmjit_libs = ' '.join(filter(lambda x: 'compiler' not in x, glob.glob('build/asmjit/CMakeFiles/asmjit.dir/src/asmjit/*/*.o')))
     Run('{LD} {LD_FLAGS} -shared -fPIC -Wl,-Bsymbolic -Wl,-soname,libredmagic.so.1.0.0 -o build/libredmagic.so.1.0.0 {objs} {udis_libs} {asmjit_libs} {LIBS}'.format(
         **dict(globals(), **locals())
@@ -161,7 +161,6 @@ def unit():
     Shell('./' + UNIT_TARGET)
 
 def deps():
-    # udis86 version 1.7.2
     if not os.path.isdir('build'):
         Shell('mkdir -p build')
     if not os.path.isfile('deps/udis86/libudis86/.libs/libudis86.so') or not os.path.isfile('deps/udis86/libudis86/itab.h'):
@@ -174,7 +173,7 @@ def deps():
         cm_args = '-DASMJIT_DISABLE_COMPILER=1 -DASMJIT_CFLAGS=\'==REPLACE_ME==\' -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc'
         if RELEASE:
             Shell('cd build/asmjit && cmake ../../deps/asmjit {} -DASMJIT_RELEASE=1'.format(cm_args), shell=True)
-            asm_flags += '\-O2'
+            asm_flags += '\-O2\ \-flto'
         else:
             Shell('cd build/asmjit && cmake ../../deps/asmjit {} -DASMJIT_DEBUG=1'.format(cm_args), shell=True)
             asm_flags += '\-ggdb'

@@ -74,6 +74,8 @@ Tracer::Tracer(CodeBuffer* buffer) {
   interrupt_block_location = written.getRawBuffer();
 
   method_address_stack.reserve(100);
+  merge_block_stack.reserve(100);
+  merge_block_stack.push_back(0);
 
   // mem_loc_t stack_ptr = (mem_loc_t)malloc(12*1024 + TRACE_STACK_SIZE);
   // stack = stack_ptr;
@@ -109,20 +111,21 @@ void red_begin_tracing(struct user_regs_struct *other_stack, void* __, Tracer* t
   assert(0);
 }
 
-extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_address, struct user_regs_struct *regs_struct) {
+extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_address, struct user_regs_struct *regs_struct, mem_loc_t merge_addr) {
 
   using redmagic::register_t;
   // the dummy address
   assert(write_jump_address != 0xfafafafafafafafa);
+  assert(merge_addr != 0xfbfbfbfbfbfbfbfb);
+
+  //assert(merge_addr == 0);
 
   // that this is a jump with a rel32 term to the next line and is aligned properly
   assert(*(uint8_t*)write_jump_address == 0xE9);
   assert(*(int32_t*)(write_jump_address + 1) == 0);
   assert(((write_jump_address + 1) & 0x3) == 0);
 
-
   assert(regs_struct->rsp - TRACE_STACK_OFFSET == (register_t)regs_struct);
-
 
   void *ret = NULL;
   //void *patch = NULL;
@@ -155,6 +158,8 @@ extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_addr
   assert(info->tracer == nullptr);
   info->tracer = head->tracer = l;
 
+  info->sub_branches++;
+
   head->is_compiled = false;
 
   l->owning_thread = manager->get_thread_id();
@@ -163,9 +168,11 @@ extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_addr
   ret = l->Start((void*)target_rip);
   //patch = l->get_start_location();
   l->set_where_to_patch((int32_t*)(write_jump_address + 1));
+  //if(merge_addr != 0)
+  l->set_merge_target(merge_addr);
 
 
-  // TODO: need to patch in the address only after the trace is done
+  // done: need to patch in the address only after the trace is done
   // otherwise the concurrent threads may have an issue
 
   // assert(patch != NULL);
@@ -177,7 +184,7 @@ extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_addr
 
   assert(ret != NULL);
 
-  red_printf("============================================\nresume trace %x at %#016lx\n", head->trace_id, target_rip);
+  red_printf("======================\nresume trace: %#016lx %x\n", target_rip, head->trace_id);
 
   //protected_malloc = true;
 
@@ -295,6 +302,13 @@ void* Tracer::Start(void *start_addr) {
   auto written = compiler.finalize();
 
   trace_start_location = buffer->getRawBuffer() + buffer->getOffset();
+
+  {
+    SimpleCompiler compiler2(buffer);
+    trace_loop_counter = compiler2.MakeCounter();
+  }
+
+  icount = 0;
 
 #if defined(NDEBUG) && defined(CONF_GLOBAL_ABORT)
   if(global_abort()) {
@@ -515,11 +529,26 @@ extern "C" void red_asm_end_trace();
 void* Tracer::EndTraceFallthrough() {
   assert(icount - last_call_instruction < 2);
   red_printf("tracer end fallthrough\n");
+
+  auto head = manager->get_tracer_head();
+  auto info = &manager->branches[head->trace_id];
+  info->traced_instruction_count += icount;
+
+
   buffer->setOffset(last_call_generated_op);
   SimpleCompiler compiler(buffer);
   compiler.mov(asmjit::x86::rdi, asmjit::imm_u(last_call_ret_addr));
   compiler.jmp(asmjit::imm_ptr(&red_asm_end_trace));
   auto w = compiler.finalize();
+  assert(merge_block_stack.size() == 1);
+  mem_loc_t write_addr = merge_block_stack[0];
+  merge_block_stack[0] = 0;
+  merge_resume = 0;
+  while(write_addr != 0) {
+    mem_loc_t next_addr = *(mem_loc_t*)write_addr;
+    *(mem_loc_t*)write_addr = 0;
+    write_addr = next_addr;
+  }
   method_address_stack.clear();
   finish_patch();
   tracing_from = 0;
@@ -533,12 +562,24 @@ void* Tracer::EndTraceLoop() {
   red_printf("tracer end loop back\n");
 
   auto head = manager->get_tracer_head();
-  mem_loc_t loop_location = (mem_loc_t)manager->branches[head->trace_id].starting_point;
+  auto info = &manager->branches[head->trace_id];
+  mem_loc_t loop_location = (mem_loc_t)info->starting_point;
   assert(loop_location);
+  info->traced_instruction_count += icount;
 
   buffer->setOffset(last_call_generated_op);
   SimpleCompiler compiler(buffer);
   compiler.jmp(asmjit::imm_ptr(loop_location));
+  assert(merge_block_stack.size() == 1);
+  assert(merge_resume == 0);
+  mem_loc_t write_addr = merge_block_stack[0];
+  merge_block_stack[0] = 0;
+  merge_resume = 0;
+  while(write_addr != 0) {
+    mem_loc_t next_addr = *(mem_loc_t*)write_addr;
+    *(mem_loc_t*)write_addr = 0;
+    write_addr = next_addr;
+  }
   method_address_stack.clear();
   finish_patch();
   tracing_from = 0;
@@ -576,7 +617,7 @@ void Tracer::TempEnableTrace(void *resume_pc) {
   SimpleCompiler compiler(buffer);
   // the "normal" return address will be set to ris when this returns from the temp disabled region
   //compiler.mov(asmjit::x86::rax, asmjit::x86::ptr(asmjit::x86::rsp, -8));
-  compiler.TestRegister((mem_loc_t)&red_asm_jump_rsi, RSI, (register_t)resume_pc);
+  compiler.TestRegister((mem_loc_t)&red_asm_jump_rsi, RSI, (register_t)resume_pc, &merge_block_stack.back());
   auto written = compiler.finalize();
   write_interrupt_block();
 }
@@ -615,6 +656,84 @@ void* Tracer::ReplaceIsTracedCall() {
   return (void*)resume_addr;
 }
 
+void* Tracer::BeginMergeBlock() {
+  assert(icount - last_call_instruction < 2);
+  buffer->setOffset(last_call_generated_op);
+  mem_loc_t ret = buffer->getRawBuffer() + buffer->getOffset();
+  // there are no instructions to generate for this
+  write_interrupt_block();
+  merge_block_stack.push_back(0);
+  return (void*)ret;
+}
+
+void* Tracer::EndMergeBlock() {
+  assert(icount - last_call_instruction < 2);
+  buffer->setOffset(last_call_generated_op);
+  if(merge_block_stack.size() == 1) {
+    assert(merge_resume != 0);
+    mem_loc_t resume_a = merge_resume;
+    merge_resume = 0;
+    SimpleCompiler compiler(buffer);
+    compiler.jmp(asmjit::imm_ptr(resume_a));
+    compiler.finalize();
+    mem_loc_t write_addr = merge_block_stack[0];
+    merge_block_stack[0] = 0;
+    // write the parent's jump address
+    while(write_addr != 0) {
+      mem_loc_t next_addr = *(mem_loc_t*)write_addr;
+      *(mem_loc_t*)write_addr = resume_a;
+      write_addr = next_addr;
+    }
+
+    // the ending of this tracer instructions
+    //method_address_stack.clear();
+    finish_patch();
+    tracing_from = 0;
+    merge_resume = 0;
+    method_address_stack.clear();
+
+    // stuff usually done by manager....TODO: converge to a single method
+    auto head = manager->get_tracer_head();
+    assert(!head->is_compiled);
+    assert(head->is_traced);
+    assert(head->tracer == this);
+    assert(head->trace_id);
+    auto info = &manager->branches[head->trace_id];
+    assert(info->tracer == this);
+    head->tracer = info->tracer = nullptr;
+
+    // auto head = manger->get_tracer_head();
+    // assert(head->trace_id);
+    // assert(head->tracer == this);
+    // assert(info->tracer == this);
+    // auto info = manager->branches[head->trace_id];
+    // head->tracer = info->tracer = nullptr;
+
+    // have to free this tracer
+    Tracer *expected = nullptr;
+    if(!free_tracer_list.compare_exchange_strong(expected, this)) {
+      // gaaaa
+      delete this;
+    }
+
+    return (void*)resume_a;
+  } else {
+    mem_loc_t merge_addr = buffer->getRawBuffer() + buffer->getOffset();
+    mem_loc_t write_addr = merge_block_stack.back();
+    write_interrupt_block();
+    merge_block_stack.pop_back();
+    while(write_addr != 0) {
+      mem_loc_t next_addr = *(mem_loc_t*)write_addr;
+      *(mem_loc_t*)write_addr = merge_addr;
+      write_addr = next_addr;
+    }
+    return (void*)merge_addr;
+  }
+
+  assert(0);
+}
+
+
 void Tracer::finish_patch() {
   if(finish_patch_addr != nullptr) {
     mem_loc_t irip = ((mem_loc_t)finish_patch_addr) + 4;
@@ -631,8 +750,6 @@ void Tracer::finish_patch() {
 
 extern "C" void* red_asm_resume_eval_block(void*, void*);
 
-float float_a = 9.4;
-
 void Tracer::continue_program(mem_loc_t resume_loc) {
   red_printf("==> %#016lx\n", resume_loc);
   assert(regs_struct->rsp - TRACE_STACK_OFFSET == (register_t)regs_struct);
@@ -640,7 +757,6 @@ void Tracer::continue_program(mem_loc_t resume_loc) {
   move_stack_by = 0;
   *((register_t*)(regs_struct->rsp - TRACE_RESUME_ADDRESS_OFFSET)) = resume_loc;
   regs_struct = (struct user_regs_struct*)red_asm_resume_eval_block(&resume_struct, regs_struct);
-  float_a *= 1.000001;
 }
 
 
@@ -1067,7 +1183,7 @@ void Tracer::evaluate_instruction() {
 
     SimpleCompiler compiler(buffer);
 
-    auto cb_b = compiler.ConditionalJump(alternate_instructions, AlignedInstructions::get_asm_mnem(emit));
+    auto cb_b = compiler.ConditionalJump(alternate_instructions, AlignedInstructions::get_asm_mnem(emit), &merge_block_stack.back());
 
     auto written = compiler.finalize();
     cb_b.replace_stump<uint64_t>(0xfafafafafafafafa, written.getRawBuffer());
@@ -1139,7 +1255,8 @@ void Tracer::evaluate_instruction() {
         }
       }
     } else if(opr->type == UD_OP_REG) {
-      assert(opr->index == UD_NONE);
+      // the value of opr->index doesn't matter and would not necessarly have been set
+      //assert(opr->index == UD_NONE);
       int ri = ud_register_to_sys(opr->base);
       assert(ri != -1);
       register_t rv = ((register_t*)regs_struct)[ri];
@@ -1148,7 +1265,7 @@ void Tracer::evaluate_instruction() {
       // written.replace_stump<uint64_t>(0xfafafafafafafafa, rv);
 
       SimpleCompiler compiler(buffer);
-      auto r_cb = compiler.TestRegister(ud_insn_off(&disassm), ri, rv);
+      auto r_cb = compiler.TestRegister(ud_insn_off(&disassm), ri, rv, &merge_block_stack.back());
       auto written = compiler.finalize();
 
       r_cb.replace_stump<uint64_t>(0xfafafafafafafafa, written.getRawBuffer());
@@ -1173,7 +1290,7 @@ void Tracer::evaluate_instruction() {
         auto v = get_opr_value(opr);
         compiler.add_used_registers(ali.registers_used());
         jump_dest = v.is_ptr ? *v.address_ptr : v.address;
-        auto r_cb = compiler.TestOperand(ud_insn_off(&disassm), ali.get_asm_op(0), jump_dest);
+        auto r_cb = compiler.TestOperand(ud_insn_off(&disassm), ali.get_asm_op(0), jump_dest, &merge_block_stack.back());
         auto written = compiler.finalize();
         r_cb.replace_stump<uint64_t>(0xfafafafafafafafa, written.getRawBuffer());
 
@@ -1297,7 +1414,7 @@ void Tracer::evaluate_instruction() {
         SimpleCompiler compiler(buffer);
         AlignedInstructions ali(&disassm);
         compiler.add_used_registers(ali.registers_used());
-        auto r_cb = compiler.TestOperand(ud_insn_off(&disassm), ali.get_asm_op(0), call_pc);
+        auto r_cb = compiler.TestOperand(ud_insn_off(&disassm), ali.get_asm_op(0), call_pc, &merge_block_stack.back());
         auto written = compiler.finalize();
         r_cb.replace_stump<uint64_t>(0xfafafafafafafafa, written.getRawBuffer());
       }
@@ -1435,9 +1552,11 @@ void Tracer::replace_rip_instruction() {
 
     /*... UD_Imovzx:*/
   case UD_Imov:
+  case UD_Imovq:
   case UD_Imovsxd:
   case UD_Imovss:
-  case UD_Imovsd: {
+  case UD_Imovsd:
+  case UD_Imovhps: {
     const ud_operand_t *opr1 = ud_insn_opr(&disassm, 0); // dest address
     const ud_operand_t *opr2 = ud_insn_opr(&disassm, 1); // source address
     assert(opr1 != NULL && opr2 != NULL);

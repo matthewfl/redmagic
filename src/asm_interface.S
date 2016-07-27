@@ -66,12 +66,15 @@ red_asm_restart_trace:
   movq %r10, %rdi
   movq %r9, %rsi
   movq %rsp, %rdx
+  movq %r8, %rcx
 
-  // restore the origional values of r14&15
+  // restore the origional values of r10,9,8
   movq 216(%rsp), %r10
   movq 224(%rsp), %r9
+  movq 232(%rsp), %r8
   movq %r10, 56(%rsp)
   movq %r9, 64(%rsp)
+  movq %r8, 72(%rsp)
 
   call red_resume_trace@plt
   m_pop_all_regs

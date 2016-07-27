@@ -15,6 +15,7 @@ enum {
   COND_JUMP,
   COND_SET,
   COND_ADD,
+  MERGE_TEST,
 };
 
 int main(int argc, char* argv[]) {
@@ -36,6 +37,7 @@ int main(int argc, char* argv[]) {
     COND_SET, 100,
     PRINT_NUM, 1,
     COND_ADD, -1,
+    MERGE_TEST, 0,
     COND_JUMP, 4,  // print num
     EXIT,
   };
@@ -81,6 +83,16 @@ int main(int argc, char* argv[]) {
     case COND_ADD:
       cond_var += program[pc + 1];
       pc += 2;
+      break;
+    case MERGE_TEST:
+      redmagic_begin_merge_block();
+      if(cond_var % 2 == 0) {
+        cout << "a\n";
+      } else {
+        cout << "b\n";
+      }
+      pc += 2;
+      redmagic_end_merge_block();
       break;
     case EXIT:
       cout << "hitting normal exit case\n" << a;

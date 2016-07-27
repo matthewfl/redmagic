@@ -76,7 +76,7 @@
   //add $16, %rax // just include this add in the offset of fxsaveq
   and $~15, %rax
 
-  fxsaveq 0x100(%rax)
+  fxsaveq 0x180(%rax)
 
   .endm
 
@@ -86,7 +86,7 @@
   // extra registers
   movq %rsp, %rax
   and $~15, %rax
-  fxrstorq 0x100(%rax)
+  fxrstorq 0x180(%rax)
 
   // eflags
   movq 144(%rsp), %r14

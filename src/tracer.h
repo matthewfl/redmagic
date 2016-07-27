@@ -42,6 +42,16 @@ namespace redmagic {
     void* TempDisableTrace();
     void TempEnableTrace(void *resume_pc);// { set_pc((uint64_t)resume_pc); }
 
+    // push the merge block stack with the current address
+    void* BeginMergeBlock();
+    // end the current merge block
+    void* EndMergeBlock();
+
+    void set_merge_target(mem_loc_t target) {
+      assert(merge_resume == 0);
+      merge_resume = target;
+    }
+
     void* ReplaceIsTracedCall();
 
     inline void *get_start_location() { return (void*)trace_start_location; }
@@ -52,6 +62,8 @@ namespace redmagic {
     }
 
     inline mem_loc_t get_origional_pc() { return udis_loc; }
+
+    inline uint64_t* get_loop_counter() { return trace_loop_counter; }
 
   public:
     // std::mutex _generation_mutex;
@@ -172,6 +184,11 @@ namespace redmagic {
     int32_t *finish_patch_addr = nullptr;
 
     std::vector<mem_loc_t> method_address_stack;
+    std::vector<mem_loc_t> merge_block_stack;
+
+    mem_loc_t merge_resume = 0;
+
+    uint64_t *trace_loop_counter = nullptr;
 
     // mem_loc_t stack;
 

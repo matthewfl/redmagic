@@ -45,17 +45,17 @@ namespace redmagic {
     void PushMemoryLocationValue(mem_loc_t where);
     void Push64bitValue(uint64_t value);
 
-    CodeBuffer TestRegister(mem_loc_t resume_pc, int reg, register_t val);
-    CodeBuffer TestMemoryLocation(mem_loc_t resume_pc, mem_loc_t where, register_t val);
+    CodeBuffer TestRegister(mem_loc_t resume_pc, int reg, register_t val, mem_loc_t *merge_addr);
+    CodeBuffer TestMemoryLocation(mem_loc_t resume_pc, mem_loc_t where, register_t val, mem_loc_t *merge_addr);
 
-    CodeBuffer TestOperand(mem_loc_t resume_pc, const asmjit::Operand& opr, register_t val);
+    CodeBuffer TestOperand(mem_loc_t resume_pc, const asmjit::Operand& opr, register_t val, mem_loc_t *merge_addr);
 
-    CodeBuffer MakeResumeTraceBlock(mem_loc_t resume_pc);
+    CodeBuffer MakeResumeTraceBlock(mem_loc_t resume_pc, mem_loc_t *merge_addr);
 
     uint64_t* MakeCounter();
 
     // return the CodeBuffer of the destination jump block instead of self
-    CodeBuffer ConditionalJump(mem_loc_t resume_pc, enum asmjit::X86InstId mnem);
+    CodeBuffer ConditionalJump(mem_loc_t resume_pc, enum asmjit::X86InstId mnem, mem_loc_t *merge_addr);
 
   private:
     void ResumeBlockJump(mem_loc_t resume_pc);
@@ -78,6 +78,8 @@ namespace redmagic {
     asmjit::StaticRuntime runtime;
 
     void set_label_address(const asmjit::Label &label, mem_loc_t addr);
+
+    void do_merge_addr(CodeBuffer &buff, mem_loc_t *merge_addr);
 
   public:
     virtual size_t _relocCode(void *_dst, asmjit::Ptr baseAddress) const noexcept override;

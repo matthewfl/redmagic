@@ -62,6 +62,9 @@ namespace redmagic {
     void *temp_disable(void *resume_pc);
     void *temp_enable(void *resume_pc);
 
+    void *begin_merge_block();
+    void *end_merge_block();
+
     void disable_branch(void *id);
 
     void* is_traced_call();
@@ -86,6 +89,9 @@ namespace redmagic {
       Tracer *tracer = nullptr;
       void *starting_point = nullptr;
       bool disabled = false;
+      int64_t traced_instruction_count = 0;
+      int sub_branches = 0;
+      uint64_t *trace_loop_counter = nullptr;
     };
 
     std::unordered_map<void*, branch_info> branches;
@@ -119,6 +125,7 @@ namespace redmagic {
   //extern thread_local bool is_traced;
   extern Manager *manager;
   extern thread_local bool protected_malloc;
+  extern std::atomic<Tracer*> free_tracer_list;
 
 
   class CodeBuffer final {

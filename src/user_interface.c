@@ -46,3 +46,5 @@ USER_INTERFACE(ensure_not_traced);
 USER_INTERFACE(temp_disable);
 USER_INTERFACE(temp_enable);
 USER_INTERFACE(is_traced);
+USER_INTERFACE(begin_merge_block);
+USER_INTERFACE(end_merge_block);
