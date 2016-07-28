@@ -93,7 +93,7 @@ class BisectTrace(gdb.Command):
             return r
 
         try:
-            while current_high - current_low > 2
+            while current_high - current_low > 2:
                 try:
                     # kernel kill so that we don't deal with random cleanup code
                     gdb.execute('signal 9')

@@ -4,6 +4,8 @@
 #include <dlfcn.h>
 #include <stdlib.h>
 
+#include <algorithm>
+
 using namespace redmagic;
 using namespace std;
 
@@ -206,6 +208,10 @@ Manager::Manager() {
   get_tracer_head();
 }
 
+Manager::~Manager() {
+  red_printf("Manager::~Manager\n");
+}
+
 void Manager::do_not_trace_method(void *addr) {
   no_trace_methods.insert(addr);
 }
@@ -236,7 +242,7 @@ void* Manager::begin_trace(void *id, void *ret_addr) {
       } else {
         assert(old_head->resume_addr == nullptr);
         old_head->tracer->JumpToNestedLoop(id);
-        trace_pc = (void*)old_head->tracer->get_origional_pc();
+        trace_pc = (void*)old_head->tracer->get_pc();
         assert(old_head->resume_addr != nullptr);
       }
     }
@@ -244,6 +250,7 @@ void* Manager::begin_trace(void *id, void *ret_addr) {
 
     //assert(tracer == nullptr);
     assert(info->tracer == nullptr || info->tracer->did_abort);
+    assert(info->starting_point == nullptr);
 
     //auto buff = make_shared<CodeBuffer>(4 * 1024 * 1024);
     auto buff = CodeBuffer::CreateBuffer(1024 * 1024);
@@ -261,6 +268,7 @@ void* Manager::begin_trace(void *id, void *ret_addr) {
     new_head->trace_id = id;
     ret = l->Start(trace_pc);
     new_head->is_traced = true;
+    assert(info->trace_loop_counter == nullptr);
     info->starting_point = l->get_start_location();
     info->trace_loop_counter = l->get_loop_counter();
   }
@@ -316,6 +324,7 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
   //return NULL;
   auto head = get_tracer_head();
   if(head->is_traced) {
+    assert(head->tracer);
     if(id == head->trace_id) {
       auto info = &branches[id];
 #ifdef CONF_GLOBAL_ABORT
@@ -351,6 +360,16 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
       return ret;
     } else {
       // then we should make a new tracer and jump to that
+      auto info = &branches[id];
+      if(info->starting_point) {
+        assert(!info->tracer); // that we are done with this
+        head->tracer->JumpToNestedLoop(id);
+        auto new_head = push_tracer_stack();
+        new_head->is_compiled = true;
+        new_head->is_traced = true;
+        new_head->trace_id = id;
+        return info->starting_point;
+      }
       return begin_trace(id, ret_addr);
     }
   } else {
@@ -368,7 +387,9 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
 
       // TODO: if this aborted, then need to make this have written the resume block at the bottom and
       if(info->tracer->did_abort) {
+#ifdef CONF_VERBOSE
         red_printf("previous attempt aborted %x\n", id);
+#endif
 #ifdef CONF_GLOBAL_ABORT
         auto head = push_tracer_stack();
         head->is_compiled = true;
@@ -387,7 +408,9 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
       head->is_compiled = true;
       head->is_traced = true;
       head->trace_id = id;
+#ifdef CONF_VERBOSE
       red_printf("entering trace %x\n", id);
+#endif
       return info->starting_point;
     }
     // don't care about atomic since we are just trying to get an estimate, so if we lose some counts it is fine
@@ -477,7 +500,7 @@ void* Manager::temp_enable(void *resume_pc) {
 
 void* Manager::begin_merge_block() {
   auto head = get_tracer_head();
-  if(head->tracer) {
+  if(head->tracer && !head->tracer->did_abort) {
     return head->tracer->BeginMergeBlock();
   }
   return NULL;
@@ -485,7 +508,7 @@ void* Manager::begin_merge_block() {
 
 void* Manager::end_merge_block() {
   auto head = get_tracer_head();
-  if(head->tracer) {
+  if(head->tracer && !head->tracer->did_abort) {
     return head->tracer->EndMergeBlock();
   }
   return NULL;
@@ -548,6 +571,10 @@ namespace {
         red_printf("failed to get dlinfo for self");
       }
     }
+    ~_noname() {
+      if(manager)
+        manager->print_info();
+    }
   } _noinst;
 }
 
@@ -567,4 +594,69 @@ bool Manager::should_trace_method(void *id) {
 #endif
 
   return true;
+}
+
+
+void Manager::print_info() {
+  UnprotectMalloc upm;
+  vector<pair<void*, branch_info*>> bi;
+  bi.reserve(branches.size());
+  // for(auto b : branches) {
+  //   bi.push_back(&b);
+  // }
+  for(auto it = branches.begin(); it != branches.end(); it++) {
+    bi.push_back(make_pair(it->first, &it->second));
+  }
+  std::sort(bi.begin(), bi.begin() + bi.size(), [](auto a, auto b) -> bool {
+      //return a < b;
+
+
+      if(a.second->trace_loop_counter != nullptr && b.second->trace_loop_counter != nullptr) {
+        if(a.second->traced_instruction_count * (*a.second->trace_loop_counter) > b.second->traced_instruction_count * (*b.second->trace_loop_counter))
+          return true;
+        else
+          return false;
+      }
+      if(a.second->trace_loop_counter == nullptr && b.second->trace_loop_counter != nullptr)
+        return false;
+      if(b.second->trace_loop_counter == nullptr && a.second->trace_loop_counter != nullptr)
+        return true;
+
+      return a.second->count > b.second->count;
+
+    });
+
+  int cnt = 0;
+  for(auto b : bi) {
+    if(cnt % 30 == 0) {
+      red_printf("%3s|%16s|%16s|%10s|%10s|%12s|%10s\n", "#", "trace id", "trace location", "loop count", "icount", "sub branches", "finish traces");
+      red_printf("===============================================================================================\n");
+    }
+    cnt++;
+    if(cnt > 200) break;
+    red_printf("%3i|%#016lx|%#016lx|%10lu|%10lu|%12i|%10i\n",
+               cnt,
+               b.first,
+               b.second->starting_point,
+               (b.second->trace_loop_counter ? *b.second->trace_loop_counter : 0),
+               b.second->traced_instruction_count,
+               b.second->sub_branches,
+               b.second->finish_traces);
+  }
+
+  red_printf("thread tracers\n");
+  red_printf("%3s|E|C|%16s|%16s|%16s|%16s|%16s\n", "#", "trace id", "tracing from", "tracing pc", "generated pc", "trace icount");
+  red_printf("======================================================================================\n");
+  for(int i = threadl_tracer_stack.size() - 1; i >= 0; i--) {
+    auto info = &threadl_tracer_stack[i];
+    red_printf("%3i|%1i|%1i|%#016lx|%#016lx|%#016lx|%#016lx|%10lu\n",
+               i,
+               (info->tracer && !info->is_temp_disabled),
+               info->is_compiled,
+               info->trace_id,
+               info->tracer ? (mem_loc_t)info->tracer->tracing_from : 0,
+               info->tracer ? info->tracer->get_pc() : 0,
+               info->tracer ? info->tracer->generated_pc() : 0,
+               info->tracer ? info->tracer->get_icount() : 0);
+  }
 }

@@ -77,6 +77,8 @@ Tracer::Tracer(CodeBuffer* buffer) {
   merge_block_stack.reserve(100);
   merge_block_stack.push_back(0);
 
+  tracing_from = 0;
+
   // mem_loc_t stack_ptr = (mem_loc_t)malloc(12*1024 + TRACE_STACK_SIZE);
   // stack = stack_ptr;
   // stack_ptr += 4*1024;
@@ -132,6 +134,7 @@ extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_addr
 
   auto head = manager->get_tracer_head();
   assert(head->trace_id != nullptr);
+  assert(manager->branches.find(head->trace_id) != manager->branches.end());
   auto info = &manager->branches[head->trace_id];
 
 #ifdef CONF_GLOBAL_ABORT
@@ -149,7 +152,11 @@ extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_addr
   if(l == nullptr) {
     // we did not get a tracer, there must not have been one
     // TODO: allocate a new tracer
-    assert(0);
+    assert(protected_malloc);
+    protected_malloc = false;
+    l = new Tracer(CodeBuffer::CreateBuffer(1024 * 1024));
+    protected_malloc = true;
+    //assert(0);
   }
   mem_loc_t old_tracing_from = l->tracing_from.exchange(target_rip);
   assert(old_tracing_from == 0);
@@ -184,7 +191,9 @@ extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_addr
 
   assert(ret != NULL);
 
+#ifdef CONF_VERBOSE
   red_printf("======================\nresume trace: %#016lx %x\n", target_rip, head->trace_id);
+#endif
 
   //protected_malloc = true;
 
@@ -221,20 +230,22 @@ extern "C" void* red_end_trace(mem_loc_t normal_end_address) {
       new_head->resume_addr = nullptr;
     } else {
 #ifdef CONF_GLOBAL_ABORT
-      assert(global_abort());
+      assert(!global_abort());
 #endif
     }
   } else {
     //protected_malloc = false;
   }
+#ifdef CONF_VERBOSE
   red_printf("exiting trace %x\n", head.trace_id);
+#endif
   return ret;
 }
 
 extern "C" void* red_branch_to_sub_trace(void *resume_addr, void *sub_trace_id, void* target_rip) {
   auto head = manager->get_tracer_head();
   assert(head->is_traced);
-  assert(head->tracer == nullptr);
+  assert(head->tracer == nullptr || head->tracer->did_abort);
   assert(head->resume_addr == nullptr);
   head->resume_addr = resume_addr;
   assert(sub_trace_id != head->trace_id);
@@ -309,6 +320,10 @@ void* Tracer::Start(void *start_addr) {
   }
 
   icount = 0;
+  last_local_jump = 0;
+  last_call_instruction = -1;
+  local_jump_min_addr = 0;
+
 
 #if defined(NDEBUG) && defined(CONF_GLOBAL_ABORT)
   if(global_abort()) {
@@ -412,6 +427,8 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
 
   processes_instructions:
     while(ud_disassemble(&disassm)) {
+
+      assert(merge_block_stack.size());
 
       ++icount;
       ++global_icount;
@@ -527,13 +544,18 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
 extern "C" void red_asm_end_trace();
 
 void* Tracer::EndTraceFallthrough() {
+  assert(current_not_traced_call_addr == (mem_loc_t)&redmagic_fellthrough_branch ||
+         current_not_traced_call_addr == (mem_loc_t)&redmagic_force_end_trace);
+  current_not_traced_call_addr = 0;
   assert(icount - last_call_instruction < 2);
+#ifdef CONF_VERBOSE
   red_printf("tracer end fallthrough\n");
+#endif
 
   auto head = manager->get_tracer_head();
   auto info = &manager->branches[head->trace_id];
   info->traced_instruction_count += icount;
-
+  info->finish_traces++;
 
   buffer->setOffset(last_call_generated_op);
   SimpleCompiler compiler(buffer);
@@ -558,14 +580,19 @@ void* Tracer::EndTraceFallthrough() {
 void* Tracer::EndTraceLoop() {
   // assert that we recently performed a call
   // this should be to ourselves to end the trace
+  assert(current_not_traced_call_addr == (mem_loc_t)&redmagic_backwards_branch);
+  current_not_traced_call_addr = 0;
   assert(icount - last_call_instruction < 2);
+#ifdef CONF_VERBOSE
   red_printf("tracer end loop back\n");
+#endif
 
   auto head = manager->get_tracer_head();
   auto info = &manager->branches[head->trace_id];
   mem_loc_t loop_location = (mem_loc_t)info->starting_point;
   assert(loop_location);
   info->traced_instruction_count += icount;
+  info->finish_traces++;
 
   buffer->setOffset(last_call_generated_op);
   SimpleCompiler compiler(buffer);
@@ -587,6 +614,7 @@ void* Tracer::EndTraceLoop() {
 }
 
 void* Tracer::TempDisableTrace() {
+  assert(current_not_traced_call_addr == (mem_loc_t)&redmagic_temp_disable);
   assert(icount - last_call_instruction < 2);
   buffer->setOffset(last_call_generated_op);
   SimpleCompiler compiler(buffer);
@@ -644,6 +672,7 @@ void Tracer::JumpToNestedLoop(void *nested_trace_id) {
 }
 
 void* Tracer::ReplaceIsTracedCall() {
+  assert(current_not_traced_call_addr == (mem_loc_t)&redmagic_is_traced);
   assert(icount - last_call_instruction < 2);
   buffer->setOffset(last_call_generated_op);
   SimpleCompiler compiler(buffer);
@@ -657,7 +686,13 @@ void* Tracer::ReplaceIsTracedCall() {
 }
 
 void* Tracer::BeginMergeBlock() {
+  // if this method is called from some context where it wasn't inlined in the code
+  // then that means that it must have been some other non inlined method which means that we do not
+  // want to perform any actions
+  if(current_not_traced_call_addr != (mem_loc_t)&redmagic_begin_merge_block)
+    return NULL;
   assert(icount - last_call_instruction < 2);
+  //assert(current_not_traced_call_addr == (mem_loc_t)&redmagic_begin_merge_block);
   buffer->setOffset(last_call_generated_op);
   mem_loc_t ret = buffer->getRawBuffer() + buffer->getOffset();
   // there are no instructions to generate for this
@@ -667,6 +702,8 @@ void* Tracer::BeginMergeBlock() {
 }
 
 void* Tracer::EndMergeBlock() {
+  if(current_not_traced_call_addr != (mem_loc_t)&redmagic_end_merge_block)
+    return NULL; // see above
   assert(icount - last_call_instruction < 2);
   buffer->setOffset(last_call_generated_op);
   if(merge_block_stack.size() == 1) {
@@ -751,7 +788,9 @@ void Tracer::finish_patch() {
 extern "C" void* red_asm_resume_eval_block(void*, void*);
 
 void Tracer::continue_program(mem_loc_t resume_loc) {
+#ifdef CONF_VERBOSE
   red_printf("==> %#016lx\n", resume_loc);
+#endif
   assert(regs_struct->rsp - TRACE_STACK_OFFSET == (register_t)regs_struct);
   regs_struct->rsp += move_stack_by;
   move_stack_by = 0;
@@ -1320,6 +1359,7 @@ void Tracer::evaluate_instruction() {
     assert(jump_dest != 0);
     if(last_call_instruction + 1 == icount) {
       // we are jumping to a method eg dynamically loaded, so change what we think the methods address is
+      assert(!method_address_stack.empty());
       method_address_stack.back() = jump_dest;
     }
     if(!manager->should_trace_method((void*)jump_dest)) {
@@ -1340,14 +1380,21 @@ void Tracer::evaluate_instruction() {
         register_t return_pc = peek_stack();
         set_pc(return_pc);
         SimpleCompiler compiler(buffer);
+        auto call_i = compiler.newLabel();
         // pop the previous return address off the stack
         compiler.add(asmjit::x86::rsp, asmjit::imm(8));
+        compiler.bind(call_i);
         compiler.call(asmjit::imm_ptr(jump_dest));
+        size_t call_io = compiler.getLabelOffset(call_i);
+        last_call_generated_op = buffer->getOffset() + call_io;
+        last_call_instruction = icount;
         auto written = compiler.finalize();
         write_interrupt_block();
         cont_addr = written.getRawBuffer();
       }
+      current_not_traced_call_addr = jump_dest;
       continue_program(cont_addr);
+      current_not_traced_call_addr = 0;
       return;
 
     }
@@ -1465,7 +1512,9 @@ void Tracer::evaluate_instruction() {
         write_interrupt_block();
         cont_addr = cb.getRawBuffer();
       }
+      current_not_traced_call_addr = call_pc;
       continue_program(cont_addr);
+      current_not_traced_call_addr = 0;
 
     } else {
       // inline this method, so push the return address and continue

@@ -61,7 +61,7 @@ namespace redmagic {
       finish_patch_addr = addr;
     }
 
-    inline mem_loc_t get_origional_pc() { return udis_loc; }
+    inline mem_loc_t get_pc() { return udis_loc; }
 
     inline uint64_t* get_loop_counter() { return trace_loop_counter; }
 
@@ -135,9 +135,11 @@ namespace redmagic {
     std::atomic<mem_loc_t> tracing_from;
     uint32_t owning_thread;
 
-
     bool did_abort = false;
 
+    // used for printing
+    inline mem_loc_t generated_pc() { return generated_location; }
+    inline int64_t get_icount() { return icount; }
 
   private:
 
@@ -177,9 +179,10 @@ namespace redmagic {
     int64_t last_call_instruction = -1;
     size_t last_call_generated_op; // where we have the corresponding gened ops (eg push ret addr)
     mem_loc_t last_call_ret_addr;
+    mem_loc_t current_not_traced_call_addr = 0; // address of the call that is currently being execuited if we aren't tracing
 
     mem_loc_t trace_start_location; // where this current trace begins
-    mem_loc_t loop_start_location; // where it should branch the loop back to
+    //mem_loc_t loop_start_location; // where it should branch the loop back to
 
     int32_t *finish_patch_addr = nullptr;
 

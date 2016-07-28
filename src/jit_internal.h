@@ -49,6 +49,7 @@ namespace redmagic {
   class Manager {
   public:
     Manager();
+    ~Manager();
 
     void* begin_trace(void *id, void *ret_addr);
     void* end_trace(void *id, void *ret_addr);
@@ -80,6 +81,8 @@ namespace redmagic {
     uint32_t tracer_stack_size();
     tracer_stack_state* get_tracer_head();
 
+    void print_info();
+
   private:
     bool should_trace_method(void *ptr);
 
@@ -91,6 +94,7 @@ namespace redmagic {
       bool disabled = false;
       int64_t traced_instruction_count = 0;
       int sub_branches = 0;
+      int finish_traces = 0; // number of branched traces that reached the end (not merged blocked back)
       uint64_t *trace_loop_counter = nullptr;
     };
 
