@@ -58,6 +58,12 @@ public:
   ~redmagic_disable() { redmagic_temp_enable(); }
 };
 
+class redmagic_merge {
+public:
+  redmagic_merge () { redmagic_begin_merge_block(); }
+  ~redmagic_merge() { redmagic_end_merge_block(); }
+};
+
 #endif
 
 

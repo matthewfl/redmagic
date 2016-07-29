@@ -3,6 +3,9 @@
 # load using source tools/gdb-helper.py
 # helpful to set: set pagination off
 
+# for gdb attach
+# echo 0 > /proc/sys/kernel/yama/ptrace_scope
+
 import gdb
 import time
 import traceback

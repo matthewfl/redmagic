@@ -93,6 +93,7 @@ namespace redmagic {
       void *starting_point = nullptr;
       bool disabled = false;
       int64_t traced_instruction_count = 0;
+      int64_t longest_trace_instruction_count = 0;
       int sub_branches = 0;
       int finish_traces = 0; // number of branched traces that reached the end (not merged blocked back)
       uint64_t *trace_loop_counter = nullptr;

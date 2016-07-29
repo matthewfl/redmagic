@@ -324,7 +324,7 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
   //return NULL;
   auto head = get_tracer_head();
   if(head->is_traced) {
-    assert(head->tracer);
+    assert(head->tracer || head->did_abort);
     if(id == head->trace_id) {
       auto info = &branches[id];
 #ifdef CONF_GLOBAL_ABORT
@@ -362,9 +362,12 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
       // then we should make a new tracer and jump to that
       auto info = &branches[id];
       if(info->starting_point) {
-        assert(!info->tracer); // that we are done with this
-        head->tracer->JumpToNestedLoop(id);
+        assert(!info->tracer || info->tracer->did_abort); // that we are done with this
         auto new_head = push_tracer_stack();
+        if(head->tracer && !head->tracer->did_abort)
+          head->tracer->JumpToNestedLoop(id);
+        else
+          new_head->did_abort = !!head->tracer;
         new_head->is_compiled = true;
         new_head->is_traced = true;
         new_head->trace_id = id;
@@ -596,6 +599,9 @@ bool Manager::should_trace_method(void *id) {
   return true;
 }
 
+namespace redmagic {
+  extern long global_icount;
+}
 
 void Manager::print_info() {
   UnprotectMalloc upm;
@@ -612,7 +618,7 @@ void Manager::print_info() {
 
 
       if(a.second->trace_loop_counter != nullptr && b.second->trace_loop_counter != nullptr) {
-        if(a.second->traced_instruction_count * (*a.second->trace_loop_counter) > b.second->traced_instruction_count * (*b.second->trace_loop_counter))
+        if(a.second->longest_trace_instruction_count * (*a.second->trace_loop_counter) > b.second->longest_trace_instruction_count * (*b.second->trace_loop_counter))
           return true;
         else
           return false;
@@ -626,27 +632,30 @@ void Manager::print_info() {
 
     });
 
+  red_printf("Global icount: %ld\n", global_icount);
+
   int cnt = 0;
   for(auto b : bi) {
     if(cnt % 30 == 0) {
-      red_printf("%3s|%16s|%16s|%10s|%10s|%12s|%10s\n", "#", "trace id", "trace location", "loop count", "icount", "sub branches", "finish traces");
-      red_printf("===============================================================================================\n");
+      red_printf("%3s|%16s|%16s|%10s|%10s|%10s|%12s|%10s\n", "#", "trace id", "trace location", "loop count", "sum icount", "max icount", "sub branches", "finished traces");
+      red_printf("=======================================================================================================\n");
     }
     cnt++;
     if(cnt > 200) break;
-    red_printf("%3i|%#016lx|%#016lx|%10lu|%10lu|%12i|%10i\n",
+    red_printf("%3i|%#016lx|%#016lx|%10lu|%10lu|%10lu|%12i|%10i\n",
                cnt,
                b.first,
                b.second->starting_point,
                (b.second->trace_loop_counter ? *b.second->trace_loop_counter : 0),
                b.second->traced_instruction_count,
+               b.second->longest_trace_instruction_count,
                b.second->sub_branches,
                b.second->finish_traces);
   }
 
   red_printf("thread tracers\n");
   red_printf("%3s|E|C|%16s|%16s|%16s|%16s|%16s\n", "#", "trace id", "tracing from", "tracing pc", "generated pc", "trace icount");
-  red_printf("======================================================================================\n");
+  red_printf("=======================================================================================================\n");
   for(int i = threadl_tracer_stack.size() - 1; i >= 0; i--) {
     auto info = &threadl_tracer_stack[i];
     red_printf("%3i|%1i|%1i|%#016lx|%#016lx|%#016lx|%#016lx|%10lu\n",

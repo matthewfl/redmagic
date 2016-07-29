@@ -192,7 +192,7 @@ extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_addr
   assert(ret != NULL);
 
 #ifdef CONF_VERBOSE
-  red_printf("======================\nresume trace: %#016lx %x\n", target_rip, head->trace_id);
+  red_printf("======================\nresume trace: %#016lx %#016lx\n", target_rip, head->trace_id);
 #endif
 
   //protected_malloc = true;
@@ -230,7 +230,7 @@ extern "C" void* red_end_trace(mem_loc_t normal_end_address) {
       new_head->resume_addr = nullptr;
     } else {
 #ifdef CONF_GLOBAL_ABORT
-      assert(!global_abort());
+      assert(!global_abort() || ret == (void*)normal_end_address);
 #endif
     }
   } else {
@@ -556,6 +556,8 @@ void* Tracer::EndTraceFallthrough() {
   auto info = &manager->branches[head->trace_id];
   info->traced_instruction_count += icount;
   info->finish_traces++;
+  if(info->longest_trace_instruction_count < icount)
+    info->longest_trace_instruction_count = icount;
 
   buffer->setOffset(last_call_generated_op);
   SimpleCompiler compiler(buffer);
@@ -593,6 +595,8 @@ void* Tracer::EndTraceLoop() {
   assert(loop_location);
   info->traced_instruction_count += icount;
   info->finish_traces++;
+  if(info->longest_trace_instruction_count < icount)
+    info->longest_trace_instruction_count = icount;
 
   buffer->setOffset(last_call_generated_op);
   SimpleCompiler compiler(buffer);
@@ -738,6 +742,9 @@ void* Tracer::EndMergeBlock() {
     auto info = &manager->branches[head->trace_id];
     assert(info->tracer == this);
     head->tracer = info->tracer = nullptr;
+    info->traced_instruction_count += icount;
+    if(info->longest_trace_instruction_count < icount)
+      info->longest_trace_instruction_count = icount;
 
     // auto head = manger->get_tracer_head();
     // assert(head->trace_id);
@@ -752,6 +759,10 @@ void* Tracer::EndMergeBlock() {
       // gaaaa
       delete this;
     }
+
+#ifdef CONF_VERBOSE
+    red_printf("merge block closing back to parent: %#016lx\n", head->trace_id);
+#endif
 
     return (void*)resume_a;
   } else {
