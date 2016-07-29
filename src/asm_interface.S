@@ -85,7 +85,9 @@ red_asm_restart_trace:
   // might end up returning to a another trace block
   .global red_asm_end_trace
 red_asm_end_trace:
+  pushq %rdi
   call red_end_trace@plt
+  popq %rsi
   jmp *%rax
 
 
@@ -94,10 +96,6 @@ red_asm_start_nested_trace:
   call red_branch_to_sub_trace@plt
   jmp *%rax
 
-
-testing:
-  jmp 0x123fa(,%r12,8)
-  mov 0xfafafa(,%r12,8), %rax
 
 
 // we don't need executable stack

@@ -78,7 +78,7 @@ extern "C" void* red_user_fellthrough_branch(void *id, void *ret_addr) {
 extern "C" void* red_user_ensure_not_traced(void *_, void *ret_addr) {
   // TODO:
   auto head = manager->get_tracer_head();
-  assert(!head->is_traced || head->did_abort); // TODO: better manage abort
+  assert(!head->is_traced);
   return NULL;
 }
 
@@ -224,6 +224,8 @@ uint32_t Manager::get_thread_id() {
 }
 
 void* Manager::begin_trace(void *id, void *ret_addr) {
+  assert(0); // TODO: rewrite this method
+
   branch_info *info = &branches[id];
   if(info->disabled)
     return NULL; // do not trace this loop
@@ -279,11 +281,13 @@ void* Manager::begin_trace(void *id, void *ret_addr) {
 extern "C" void* red_end_trace(mem_loc_t);
 
 void* Manager::end_trace(void *id, void *ret_addr) {
+  assert(0); // TODO: rewrite this method
+
   void *ret;
   Tracer *l;
   auto head = get_tracer_head();
   branch_info *info = &branches[id];
-  if(!head->tracer || head->did_abort) {
+  if(!head->tracer /*|| head->did_abort*/) {
     // then we weren't actually running on the tracer
     return red_end_trace((mem_loc_t)ret_addr);
   }
@@ -321,6 +325,112 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
   if(id == nullptr)
     return NULL;
 
+  tracer_stack_state* head = get_tracer_head();
+  tracer_stack_state* new_head = nullptr;
+  Tracer *l;
+  void* start_addr = ret_addr;
+  auto info = &branches[id];
+  if(head->trace_id == id) {
+    if(head->is_traced) {
+#ifdef CONF_GLOBAL_ABORT
+      //assert(!head->did_abort);
+#endif
+      assert(!head->is_compiled);
+      assert(info->tracer == head->tracer);
+      assert(!info->disabled);
+      void *ret = head->tracer->EndTraceLoop();
+      head->is_compiled = true;
+      l = head->tracer;
+      head->tracer = info->tracer = nullptr;
+
+      Tracer *expected = nullptr;
+      if(!free_tracer_list.compare_exchange_strong(expected, l)) {
+        // failled to save the tracer to the free list head
+        delete l;
+      }
+
+      return ret;
+    } else {
+      new_head = head;
+      if(info->starting_point && (!info->tracer || info->tracer->did_abort)) {
+        // then we must have performed the abort
+        //assert(info->tracer->did_abort);
+        head->is_traced = true;
+        head->is_compiled = true;
+        //head->tracer = info->tracer;
+        return info->starting_point;
+      }
+      goto check_new_trace;
+    }
+  } else {
+    // if there is no tracer set then that means that this was either call directly from normal code
+    // and the ret_addr is a valid starting point, or this is call from branch_to_sub_trace which
+    // will pass in a valid address to the ret_addr
+    if(head->tracer) {
+      //assert(head->tracer);
+      start_addr = (void*)head->tracer->get_pc();
+      head->tracer->JumpToNestedLoop(id);
+    }
+    new_head = push_tracer_stack();
+    head = &threadl_tracer_stack[threadl_tracer_stack.size() - 2];
+    new_head->trace_id = id;
+    if(info->starting_point) {
+      assert(!info->tracer || info->tracer->did_abort);
+      new_head->is_compiled = true;
+      new_head->is_traced = true;
+#ifdef CONF_VERBOSE
+      red_printf("entering trace %x\n", id);
+#endif
+      return info->starting_point;
+    }
+    goto check_new_trace;
+    // int cnt = info->count++;
+    // if(cnt > CONF_NUMBER_OF_JUMPS_BEFORE_TRACE) {
+    //   goto start_new_trace;
+    //   //return begin_trace(id, ret_addr);
+    // }
+    // return NULL;
+  }
+
+ check_new_trace:
+  int cnt = info->count++;
+  if(info->tracer) {
+    // then it aborted or is currently performing this trace
+    if(info->tracer->did_abort) {
+      new_head->is_compiled = true;
+      new_head->is_traced = true;
+#ifdef CONF_VERBOSE
+      red_printf("entering aborted trace %x\n", id);
+#endif
+      return info->starting_point;
+    }
+    return start_addr;
+  }
+  if(cnt > CONF_NUMBER_OF_JUMPS_BEFORE_TRACE && !info->disabled) {
+    goto start_new_trace;
+  }
+
+  return start_addr; // do nothing, force it to jump back to "normal" address even if coming from a tracer
+
+ start_new_trace:
+  assert(!info->disabled);
+  assert(!info->tracer);
+  assert(new_head != nullptr);
+  assert(info->trace_loop_counter == nullptr);
+  auto buff = CodeBuffer::CreateBuffer(1024 * 1024);
+  info->tracer = new_head->tracer = l = new Tracer(buff);
+  l->tracing_from = (mem_loc_t)start_addr;
+  l->owning_thread = get_thread_id();
+  void *ret = l->Start(start_addr);
+  new_head->is_traced = true;
+  info->starting_point = l->get_start_location();
+  info->trace_loop_counter = l->get_loop_counter();
+
+  return ret;
+
+
+
+  /*
   //return NULL;
   auto head = get_tracer_head();
   if(head->is_traced) {
@@ -424,6 +534,7 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
     }
   }
   return NULL;
+  */
 }
 
 void* Manager::fellthrough_branch(void *id, void *ret_addr) {
@@ -431,7 +542,59 @@ void* Manager::fellthrough_branch(void *id, void *ret_addr) {
   if(id == nullptr)
     return NULL;
 
+  Tracer *l;
+  void *ret = NULL;
   auto head = get_tracer_head();
+  if(head->trace_id == id) {
+    auto info = &branches[id];
+    if(head->is_traced) {
+      assert(!head->is_compiled);
+      assert(!info->disabled);
+      assert(head->tracer && head->tracer == info->tracer);
+      l = head->tracer;
+      // this will pop the head of the stack internally
+      ret = l->EndTraceFallthrough();
+      info->tracer = head->tracer = nullptr;
+
+      Tracer *expected = nullptr;
+      if(!free_tracer_list.compare_exchange_strong(expected, l)) {
+        // failled to save the tracer to the free list head
+        delete l;
+      }
+
+      return ret;
+    } else {
+      assert(!head->is_compiled);
+      assert(head->resume_addr == nullptr);
+      assert(head->is_temp_disabled == false);
+      // we have to pop this frame since we weren't being traced and there is nothing that will do it for us
+      pop_tracer_stack();
+      auto new_head = get_tracer_head();
+      if(new_head->resume_addr) {
+        if(new_head->tracer) {
+          // ret_addr will not be a traced address but a real normal address
+          // so we set that as the possible resume address if there is a tracer that we are going to be resuming
+          new_head->tracer->JumpFromNestedLoop(ret_addr);
+        }
+        ret = new_head->resume_addr;
+        new_head->resume_addr = nullptr;
+        return ret;
+      }
+      return NULL;
+    }
+  }
+
+  if(head->is_traced) {
+    // there is a fallthrough without a backwards branch which means that we never
+    // got to the backwards branch portion of this loop
+    assert(!head->is_compiled);
+    assert(head->tracer);
+    return head->tracer->DeleteLastCall();
+  }
+
+  return NULL;
+
+  /*
   if(head->trace_id == id && head->is_traced) {
     return end_trace(id, ret_addr);
     // branch_info *info = &branches[id];
@@ -449,26 +612,27 @@ void* Manager::fellthrough_branch(void *id, void *ret_addr) {
     // //l->tracing_from.store(0);
     // return ret;
   }
-  return NULL;
+  */
 }
 
-void* Manager::temp_disable(void *resume_pc) {
-  temp_disable_last_addr = resume_pc;
+void* Manager::temp_disable(void *ret_addr) {
+  temp_disable_last_addr = ret_addr;
   auto head = get_tracer_head();
   assert(!head->is_temp_disabled);
   head->is_temp_disabled = true;
   void *ret = NULL;
-  assert(!head->is_traced || head->tracer || head->did_abort);
+  assert(!head->is_traced || head->tracer);
   if(head->tracer && !head->tracer->did_abort) {
     // this will push the stack
     ret = head->tracer->TempDisableTrace();
   } else {
+    assert(!head->resume_addr);
     push_tracer_stack();
   }
   return ret;
 }
 
-void* Manager::temp_enable(void *resume_pc) {
+void* Manager::temp_enable(void *ret_addr) {
   auto old_head = pop_tracer_stack();
   assert(!old_head.is_temp_disabled);
   auto head = get_tracer_head();
@@ -476,7 +640,7 @@ void* Manager::temp_enable(void *resume_pc) {
   head->is_temp_disabled = false;
   void *ret = NULL;
   if(head->tracer && !head->tracer->did_abort) {
-    head->tracer->TempEnableTrace(resume_pc);
+    head->tracer->TempEnableTrace(ret_addr);
   }
   if(head->resume_addr != nullptr) {
     ret = head->resume_addr;
@@ -532,7 +696,8 @@ void* Manager::is_traced_call() {
 void Manager::disable_branch(void *id) {
   branches[id].disabled = true;
   for(int i = 0; i < threadl_tracer_stack.size(); i++) {
-    assert(threadl_tracer_stack[i].trace_id != id);
+    auto b = &threadl_tracer_stack[i];
+    assert(b->trace_id != id || !b->is_traced);
   }
 }
 
@@ -575,8 +740,11 @@ namespace {
       }
     }
     ~_noname() {
-      if(manager)
+      if(manager) {
+        // this is at the end of the program so don't print this jumk
+        threadl_tracer_stack.clear();
         manager->print_info();
+      }
     }
   } _noinst;
 }

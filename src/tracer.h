@@ -36,7 +36,7 @@ namespace redmagic {
     // the there is a nested loop that we should trace
     void JumpToNestedLoop(void *nested_trace_id);
 
-    void JumpFromNestedLoop(void *resume_pc) { set_pc((uint64_t)resume_pc); }
+    void JumpFromNestedLoop(void *resume_pc); // { set_pc((uint64_t)resume_pc); }
 
     // generate a temp disable command, sets the thread local where to resume to address
     void* TempDisableTrace();
@@ -46,6 +46,8 @@ namespace redmagic {
     void* BeginMergeBlock();
     // end the current merge block
     void* EndMergeBlock();
+
+    void* DeleteLastCall();
 
     void set_merge_target(mem_loc_t target) {
       assert(merge_resume == 0);

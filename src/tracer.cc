@@ -78,28 +78,9 @@ Tracer::Tracer(CodeBuffer* buffer) {
   merge_block_stack.push_back(0);
 
   tracing_from = 0;
-
-  // mem_loc_t stack_ptr = (mem_loc_t)malloc(12*1024 + TRACE_STACK_SIZE);
-  // stack = stack_ptr;
-  // stack_ptr += 4*1024;
-  // stack_ptr &= ~(4*1024 - 1); // align to a page
-  // int r = mprotect((void*)stack_ptr, 4*1024, PROT_NONE);
-  // assert(!r);
-  // r = mprotect((void*)(stack_ptr + TRACE_STACK_SIZE + 4*1024), 4*1024, PROT_NONE);
-  // assert(!r);
-
-  // stack = (mem_loc_t)malloc(8*1024 + TRACE_STACK_SIZE);
 }
 
 Tracer::~Tracer() {
-  // mem_loc_t stack_ptr = (stack + 4*1024) & ~(4*1024 - 1);
-  // int r = mprotect((void*)stack_ptr, 4*1024, PROT_READ | PROT_WRITE);
-  // assert(!r);
-  // r = mprotect((void*)(stack_ptr + TRACE_STACK_SIZE + 4*1024), 4*1024, PROT_READ | PROT_WRITE);
-  // assert(!r);
-  // free((void*)stack);
-
-  // free((void*)stack);
   if(buffer != nullptr)
     CodeBuffer::Release(buffer);
 }
@@ -116,11 +97,9 @@ void red_begin_tracing(struct user_regs_struct *other_stack, void* __, Tracer* t
 extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_address, struct user_regs_struct *regs_struct, mem_loc_t merge_addr) {
 
   using redmagic::register_t;
-  // the dummy address
+  // the dummy values
   assert(write_jump_address != 0xfafafafafafafafa);
   assert(merge_addr != 0xfbfbfbfbfbfbfbfb);
-
-  //assert(merge_addr == 0);
 
   // that this is a jump with a rel32 term to the next line and is aligned properly
   assert(*(uint8_t*)write_jump_address == 0xE9);
@@ -130,16 +109,18 @@ extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_addr
   assert(regs_struct->rsp - TRACE_STACK_OFFSET == (register_t)regs_struct);
 
   void *ret = NULL;
-  //void *patch = NULL;
 
   auto head = manager->get_tracer_head();
   assert(head->trace_id != nullptr);
+  assert(!head->is_temp_disabled);
   assert(manager->branches.find(head->trace_id) != manager->branches.end());
   auto info = &manager->branches[head->trace_id];
 
 #ifdef CONF_GLOBAL_ABORT
   if(global_abort()) {
-    head->did_abort = true;
+    //head->did_abort = true;
+    // manager->pop_tracer_stack();
+    head->is_compiled = head->is_traced = false;
     *((register_t*)(regs_struct->rsp - TRACE_RESUME_ADDRESS_OFFSET)) = (register_t)target_rip;
     return;
   }
@@ -171,23 +152,10 @@ extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_addr
 
   l->owning_thread = manager->get_thread_id();
 
-  // calling Start will invalidate the stack
+  // calling Start will invalidate the previous stack
   ret = l->Start((void*)target_rip);
-  //patch = l->get_start_location();
   l->set_where_to_patch((int32_t*)(write_jump_address + 1));
-  //if(merge_addr != 0)
   l->set_merge_target(merge_addr);
-
-
-  // done: need to patch in the address only after the trace is done
-  // otherwise the concurrent threads may have an issue
-
-  // assert(patch != NULL);
-  // CodeBuffer jbuf(write_jump_address, 15, true);
-  // jbuf.setOffset(0);
-  // SimpleCompiler jcompiler(&jbuf);
-  // jcompiler.jmp(asmjit::imm_ptr(patch));
-  // auto w = jcompiler.finalize();
 
   assert(ret != NULL);
 
@@ -195,13 +163,8 @@ extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_addr
   red_printf("======================\nresume trace: %#016lx %#016lx\n", target_rip, head->trace_id);
 #endif
 
-  //protected_malloc = true;
-
+  // set the address to jump to
   *((register_t*)(regs_struct->rsp - TRACE_RESUME_ADDRESS_OFFSET)) = (register_t)ret;
-  //return ret;
-}
-namespace redmagic {
-  //extern thread_local void *temp_disable_resume;
 }
 
 extern "C" void red_set_temp_resume(void *resume_addr) {
@@ -210,16 +173,13 @@ extern "C" void red_set_temp_resume(void *resume_addr) {
   head->resume_addr = resume_addr;
   head->is_temp_disabled = true;
   manager->push_tracer_stack();
-  //temp_disable_resume = resume_addr;
 }
 
 extern "C" void* red_end_trace(mem_loc_t normal_end_address) {
   // return the address that we want to jump to
-  // TODO: check the trace stack
   auto head = manager->pop_tracer_stack();
   auto new_head = manager->get_tracer_head();
   assert(head.is_traced);
-  //assert(!new_head->is_traced); // TODO: resuming a previously interrupted trace
   void *ret = (void*)normal_end_address;
   if(new_head->is_traced) {
     if(new_head->tracer) {
@@ -233,8 +193,6 @@ extern "C" void* red_end_trace(mem_loc_t normal_end_address) {
       assert(!global_abort() || ret == (void*)normal_end_address);
 #endif
     }
-  } else {
-    //protected_malloc = false;
   }
 #ifdef CONF_VERBOSE
   red_printf("exiting trace %x\n", head.trace_id);
@@ -243,6 +201,21 @@ extern "C" void* red_end_trace(mem_loc_t normal_end_address) {
 }
 
 extern "C" void* red_branch_to_sub_trace(void *resume_addr, void *sub_trace_id, void* target_rip) {
+  auto head = manager->get_tracer_head();
+  assert(head->is_traced);
+  assert(!head->tracer);
+  assert(head->resume_addr == nullptr);
+  head->resume_addr = resume_addr;
+  assert(sub_trace_id != head->trace_id);
+
+  protected_malloc = false;
+  void *ret = manager->backwards_branch(sub_trace_id, target_rip);
+  protected_malloc = true;
+  return ret;
+
+
+
+  /*
   auto head = manager->get_tracer_head();
   assert(head->is_traced);
   assert(head->tracer == nullptr || head->tracer->did_abort);
@@ -268,6 +241,7 @@ extern "C" void* red_branch_to_sub_trace(void *resume_addr, void *sub_trace_id, 
   new_head->trace_id = sub_trace_id;
 
   return info->starting_point;
+  */
 }
 
 extern "C" void red_asm_start_tracing(void*, void*, void*, void*);
@@ -423,6 +397,8 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
       buffer = new_buffer;
       generated_location = new_gen_l;
       protected_malloc = true;
+
+      write_interrupt_block();
     }
 
   processes_instructions:
@@ -654,6 +630,11 @@ void Tracer::TempEnableTrace(void *resume_pc) {
   write_interrupt_block();
 }
 
+void Tracer::JumpFromNestedLoop(void *resume_pc) {
+  // same code where we check the rsi register for where we expect to resume the trace from
+  TempEnableTrace(resume_pc);
+}
+
 extern "C" void red_asm_start_nested_trace();
 
 void Tracer::JumpToNestedLoop(void *nested_trace_id) {
@@ -779,6 +760,15 @@ void* Tracer::EndMergeBlock() {
   }
 
   assert(0);
+}
+
+
+void* Tracer::DeleteLastCall() {
+  assert(icount - last_call_instruction < 2);
+  buffer->setOffset(last_call_generated_op);
+  mem_loc_t ret = buffer->getRawBuffer() + buffer->getOffset();
+  write_interrupt_block();
+  return (void*)ret;
 }
 
 
@@ -1711,7 +1701,11 @@ void Tracer::abort() {
     red_printf("\n--ABORT--\n");
     did_abort = true;
     auto head = manager->get_tracer_head();
-    head->did_abort = true;
+    head->is_traced = head->is_compiled = false;
+    //head->did_abort = true;
+    auto info = &manager->branches[head->trace_id];
+    assert(info->tracer == this);
+    //info->tracer = nullptr;
     //manager->get_tracer_head()->is_traced = false;
     //is_traced = false;
 
@@ -1727,6 +1721,9 @@ void Tracer::abort() {
   //protected_malloc = false;
   mem_loc_t l = current_location;
   while(true) {
+    auto head = manager->get_tracer_head();
+    head->is_traced = head->is_compiled = false;
+    head->tracer = nullptr;
     continue_program(l);
     red_printf("was running an aborted trace\n");
   }

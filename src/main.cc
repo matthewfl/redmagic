@@ -34,7 +34,7 @@ int main(int argc, char* argv[]) {
 
   int program[] = {
     PRINT_NUM, 0,
-    COND_SET, 100,
+    COND_SET, 400,
     PRINT_NUM, 1,
     COND_ADD, -1,
     MERGE_TEST, 0,

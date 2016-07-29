@@ -60,8 +60,8 @@ namespace redmagic {
 
     void ensure_not_traced();
 
-    void *temp_disable(void *resume_pc);
-    void *temp_enable(void *resume_pc);
+    void *temp_disable(void *ret_addr);
+    void *temp_enable(void *ret_addr);
 
     void *begin_merge_block();
     void *end_merge_block();
@@ -121,7 +121,7 @@ namespace redmagic {
     bool is_temp_disabled = false;
     bool is_traced = false;
     bool is_compiled = false;
-    bool did_abort = false;
+    //bool did_abort = false;
   };
 
   //extern thread_local std::vector<tracer_stack_state> trace_return_addr;

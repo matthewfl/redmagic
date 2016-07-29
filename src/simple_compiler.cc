@@ -270,7 +270,8 @@ uint64_t* SimpleCompiler::MakeCounter() {
   //auto op = x86::ptr_abs((Ptr)cptr);
   auto op = x86::ptr(label);
   op.setSize(8);
-  add(op, 1);
+  inc(op);  // use inc instead of add since this won't change the eflags
+  //add(op, 1);
   //assert(0);
 
   return cptr;

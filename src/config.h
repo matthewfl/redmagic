@@ -3,7 +3,7 @@
 
 
 // using 10 will cause ipython to crash, TODO: find the bug...
-#define CONF_NUMBER_OF_JUMPS_BEFORE_TRACE 100
+#define CONF_NUMBER_OF_JUMPS_BEFORE_TRACE 10
 
 
 //#define CONF_VERBOSE
