@@ -172,8 +172,10 @@ namespace redmagic {
     bool rip_used = false;
     int64_t icount = 0;
 
+#ifdef CONF_ATTEMPT_FORWARD_JUMP_INLINE
     mem_loc_t last_local_jump = 0;
     mem_loc_t local_jump_min_addr = 0;
+#endif
 
     mem_loc_t interrupt_block_location;
 

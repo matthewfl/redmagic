@@ -379,7 +379,7 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
       new_head->is_compiled = true;
       new_head->is_traced = true;
 #ifdef CONF_VERBOSE
-      red_printf("entering trace %x\n", id);
+      red_printf("entering trace %#016lx\n", id);
 #endif
       return info->starting_point;
     }
@@ -400,7 +400,7 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
       new_head->is_compiled = true;
       new_head->is_traced = true;
 #ifdef CONF_VERBOSE
-      red_printf("entering aborted trace %x\n", id);
+      red_printf("entering aborted trace %#016lx\n", id);
 #endif
       return info->starting_point;
     }
@@ -694,7 +694,8 @@ void* Manager::is_traced_call() {
 }
 
 void Manager::disable_branch(void *id) {
-  branches[id].disabled = true;
+  auto info = &branches[id];
+  info->disabled = true;
   for(int i = 0; i < threadl_tracer_stack.size(); i++) {
     auto b = &threadl_tracer_stack[i];
     assert(b->trace_id != id || !b->is_traced);

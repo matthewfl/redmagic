@@ -65,8 +65,9 @@ Tracer::Tracer(CodeBuffer* buffer) {
   ud_set_input_hook(&disassm, udis_input_hook);
   ud_set_mode(&disassm, 64); // 64 bit
   ud_set_vendor(&disassm, UD_VENDOR_INTEL);
+#ifdef CONF_VERBOSE
   ud_set_syntax(&disassm, UD_SYN_ATT);
-
+#endif
 
   auto written = buffer->writeToEnd(cb_interrupt_block);
   written.replace_stump<uint64_t>(0xfafafafafafafafa, (uint64_t)&resume_struct);
@@ -195,7 +196,7 @@ extern "C" void* red_end_trace(mem_loc_t normal_end_address) {
     }
   }
 #ifdef CONF_VERBOSE
-  red_printf("exiting trace %x\n", head.trace_id);
+  red_printf("exiting trace %#016lx\n", head.trace_id);
 #endif
   return ret;
 }
@@ -213,54 +214,16 @@ extern "C" void* red_branch_to_sub_trace(void *resume_addr, void *sub_trace_id, 
   protected_malloc = true;
   return ret;
 
-
-
-  /*
-  auto head = manager->get_tracer_head();
-  assert(head->is_traced);
-  assert(head->tracer == nullptr || head->tracer->did_abort);
-  assert(head->resume_addr == nullptr);
-  head->resume_addr = resume_addr;
-  assert(sub_trace_id != head->trace_id);
-
-  Manager::branch_info *info = &manager->branches[sub_trace_id];
-  if(info->tracer != nullptr) {
-#ifdef CONF_GLOBAL_ABORT
-    assert(info->tracer->did_abort);
-#else
-    assert(0); // TODO: vvv
-#endif
-    // TODO: pop this element off the manager stack and abort the trace by jumping back to normal code
-    // also check that the inner loop wasn't aborted?
-    // maybe treat this as a temp disabled inner loop
-  }
-  assert(info->starting_point != nullptr);
-  assert(!info->disabled);
-  auto new_head = manager->push_tracer_stack();
-  new_head->is_traced = true;
-  new_head->trace_id = sub_trace_id;
-
-  return info->starting_point;
-  */
 }
 
 extern "C" void red_asm_start_tracing(void*, void*, void*, void*);
 extern "C" void red_asm_begin_block();
-
-// extern "C" void _dl_runtime_resolve();
-// extern "C" void _dl_fixup();
-
 void* Tracer::Start(void *start_addr) {
-  //generation_lock.lock();
 
   set_pc((mem_loc_t)start_addr);
-  //set_pc((uint64_t)&red_asm_ret_only);
-
-  //red_asm_start_tracing(NULL, (void*)&red_begin_tracing, this, stack - sizeof(stack));
 
   using namespace asmjit;
   SimpleCompiler compiler(buffer);
-  //compiler.mov(x86::rdx, x86::rsp);
   // stash the values of the register that we are about to override
   compiler.mov(x86::ptr(x86::rsp, static_cast<int32_t>(-TRACE_STACK_OFFSET - sizeof(struct user_regs_struct))), x86::rdx);
   compiler.mov(x86::ptr(x86::rsp, static_cast<int32_t>(-TRACE_STACK_OFFSET - sizeof(struct user_regs_struct) - sizeof(register_t))), x86::rsi);
@@ -270,19 +233,15 @@ void* Tracer::Start(void *start_addr) {
   compiler.mov(x86::rdx, imm_ptr(this)); // argument 3
   compiler.mov(x86::rsi, imm_ptr(&red_begin_tracing));
 
-  //mem_loc_t stack_ptr = ((stack + 8*1024) & ~(4*1024 - 1)) + TRACE_STACK_SIZE;
   mem_loc_t stack_ptr = (((mem_loc_t)stack_) + sizeof(stack_)) & ~63;
 
   resume_struct = {0};
   resume_struct.stack_pointer = (register_t)stack_ptr - sizeof(mem_loc_t);
   *(void**)(stack_ptr - sizeof(mem_loc_t)) = (void*)&red_asm_begin_block;
-  //compiler.mov(x86::rsp, imm_ptr(stack - sizeof(stack)));
-  //compiler.push(imm_ptr(red_begin_tracing));
 
   compiler.jmp(imm_ptr(interrupt_block_location));
   compiler.mov(x86::r15, imm_u(0xdeadbeef));
   compiler.mov(x86::r15, imm_ptr(start_addr));
-  //compiler.jmp(imm_ptr(start_addr));
 
   auto written = compiler.finalize();
 
@@ -294,41 +253,39 @@ void* Tracer::Start(void *start_addr) {
   }
 
   icount = 0;
-  last_local_jump = 0;
   last_call_instruction = -1;
+#ifdef CONF_ATTEMPT_FORWARD_JUMP_INLINE
+  last_local_jump = 0;
   local_jump_min_addr = 0;
+#endif
 
 
-#if defined(NDEBUG) && defined(CONF_GLOBAL_ABORT)
-  if(global_abort()) {
-    // disable this tracing
+#ifdef CONF_GLOBAL_ABORT
+#ifdef NDEBUG
+#error "global abort without debug?"
+#endif
+  // if(global_abort()) {
+  //   // disable this tracing
 
-    SimpleCompiler compiler2(buffer);
-    compiler2.jmp(imm_ptr(start_addr));
+  //   SimpleCompiler compiler2(buffer);
+  //   compiler2.jmp(imm_ptr(start_addr));
 
-    did_abort = true;
-    manager->get_tracer_head()->did_abort = true;
-    CodeBuffer::Relase(buffer);
-    buffer = nullptr;
-    return start_addr;
-  }
+  //   did_abort = true;
+  //   manager->get_tracer_head()->did_abort = true;
+  //   CodeBuffer::Relase(buffer);
+  //   buffer = nullptr;
+  //   assert(0);
+  //   return start_addr;
+  // }
 #endif
 
   return (void*)written.getRawBuffer();
-  //return (void*)&red_begin_tracing;
 }
 
 // abort after some number of instructions to see if there is an error with the first n instructions
 // useful for bisecting which instruction is failing if there is an error
 //#define ABORT_BEFORE 50
-//56
 
-// break with 16 after 10 iterations
-// if we should check what the loop number is first
-//#define ABORT_ENTER_ITER 10
-
-// 15 works, 16 breaks with `mov (%rdx, %rax) %eax`
-// 21 was breaking almost instantly after `jmp *%rax`
 
 #ifndef NDEBUG
 bool Tracer::debug_check_abort() {
@@ -343,8 +300,6 @@ bool Tracer::debug_check_abort() {
     return true;
 #endif
 
-  // if(loop_n == 10)
-  //   return true;
   return false;
 }
 #endif
@@ -369,7 +324,9 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
     assert(after_stack == 0xdeadbeef);
     generated_location = buffer->getRawBuffer() + buffer->getOffset();
     last_location = udis_loc;
+#ifdef CONF_ATTEMPT_FORWARD_JUMP_INLINE
     local_jump_min_addr = last_local_jump = 0;
+#endif
     assert(current_location == last_location);
     assert(protected_malloc);
     //assert(generation_lock.owns_lock());
@@ -377,14 +334,17 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
     // if we somehow have less then 1kb free then we might have overwritten something
     // which is why this is asserted as an error
     assert(buffer->getFree() > 1024);
-    if(buffer->getFree() <= 10 * 1024) {
+    if(buffer->getFree() <= 10 * 1024 && icount - last_call_instruction > 5) {
       // there is less than 10 kb of space on this buffer, so we are going to make a new one
       // disabling malloc protecting might be bad...
       protected_malloc = false;
+#ifdef CONF_VERBOSE
+      red_printf("switching code generation buffer\n");
+#endif
       auto new_buffer = CodeBuffer::CreateBuffer(1024 * 1024);
       {
         SimpleCompiler compiler(new_buffer);
-        compiler.mov(asmjit::x86::r15, asmjit::imm_u(0xdeadcafe));
+        compiler.mov(asmjit::x86::r15, asmjit::imm_u(0xdeadcafe1));
         compiler.mov(asmjit::x86::r15, asmjit::imm_u(generated_location));
       }
       auto new_gen_l = new_buffer->getRawBuffer() + new_buffer->getOffset();
@@ -398,7 +358,6 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
       generated_location = new_gen_l;
       protected_malloc = true;
 
-      write_interrupt_block();
     }
 
   processes_instructions:
@@ -412,8 +371,8 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
 
 #ifdef CONF_VERBOSE
       Dl_info dlinfo;
-      dladdr((void*)ud_insn_off(&disassm), &dlinfo);
       auto ins_loc = ud_insn_off(&disassm);
+      dladdr((void*)ins_loc, &dlinfo);
 
       if(dlinfo.dli_sname != nullptr)
         red_printf("[%10lu %8i %#016lx] \t%-38s %-20s %s\n", global_icount, icount, ins_loc, ud_insn_asm(&disassm), ud_insn_hex(&disassm), dlinfo.dli_sname);
@@ -421,21 +380,26 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
         red_printf("[%10lu %8i %#016lx] \t%-38s %-20s lib=%s\n", global_icount, icount, ins_loc, ud_insn_asm(&disassm), ud_insn_hex(&disassm), dlinfo.dli_fname);
 #endif
 
-      //fprintf(stderr, );
-      //fflush(stderr);
-
       jmp_info = decode_instruction();
       if(jmp_info.is_jump) {
         if(jmp_info.is_local_jump) {
           // there is a chance that we can directly inline this if this is a short loop
+          assert(jmp_info.local_jump_offset);
           if(jmp_info.local_jump_offset < 0) {
+#ifdef CONF_ATTEMPT_BACKWARDS_JUMP_INLINE
             if(udis_loc - current_location  > -jmp_info.local_jump_offset) {
               // this is a backwards branch that is going an acceptable distance
               goto instruction_approved;
             }
+#endif
           } else {
+#ifdef CONF_ATTEMPT_FORWARD_JUMP_INLINE
             // this is a forward branch
-            if(jmp_info.local_jump_offset > 512)
+            // TODO: there is some bug in this part of code....not sure what it is
+            // when running with max foward distance of 512 and starting ipython it will end up crashing
+            // when tracing PyInt_AsSsize_t
+            // use the bisect tool to find where exactly it is crashing
+            if(jmp_info.local_jump_offset > 100)
               // this is too far forward, we are unlikely to actually be able to inline this, so just run it
               goto run_instructions;
             if(last_local_jump == 0) {
@@ -445,8 +409,8 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
             if(udis_loc + jmp_info.local_jump_offset > local_jump_min_addr)
               local_jump_min_addr = udis_loc + jmp_info.local_jump_offset;
             goto instruction_approved;
+#endif
           }
-
         }
         goto run_instructions;
       }
@@ -469,22 +433,26 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
 #endif
     instruction_approved:
       last_location = udis_loc;
+#ifdef CONF_ATTEMPT_FORWARD_JUMP_INLINE
       if(local_jump_min_addr && udis_loc > local_jump_min_addr) {
         // yay, we are able to direclty inline this jump
         local_jump_min_addr = last_local_jump = 0;
       }
+#endif
     }
   run_instructions:
+#ifdef CONF_ATTEMPT_FORWARD_JUMP_INLINE
     if(local_jump_min_addr > last_location) {
       // we failed to get far enough in the decoding to allow these jumps to be inlined
       // so we revert back to the last "good" state
       last_location = last_local_jump;
       set_pc(last_local_jump);
       ud_disassemble(&disassm);
-      last_local_jump = local_jump_min_addr = 0;
       // these jumps can't reference registers so if that is what caused the break then set to false
       rip_used = false;
     }
+    //last_local_jump = local_jump_min_addr = 0;
+#endif
     if(current_location != last_location) {
       {
         CodeBuffer ins_set(current_location, last_location - current_location);
@@ -599,19 +567,14 @@ void* Tracer::TempDisableTrace() {
   buffer->setOffset(last_call_generated_op);
   SimpleCompiler compiler(buffer);
   auto label = compiler.newLabel();
-  //compiler.mov(asmjit::x86::rdi, asmjit::imm_u(0xfafafafafafafafa));
   compiler.lea(asmjit::x86::rdi, asmjit::x86::ptr(label));
   compiler.call(asmjit::imm_ptr(&red_set_temp_resume));
   compiler.jmp(asmjit::imm_ptr(last_call_ret_addr));
-  compiler.mov(asmjit::x86::r15, asmjit::imm_u(0xdeadcafe));
+  compiler.mov(asmjit::x86::r15, asmjit::imm_u(0xdeadcafe2));
   compiler.bind(label);
   auto written = compiler.finalize();
-  // SimpleCompiler compiler2(buffer.get());
-  // compiler2.mov(asmjit::x86::rax, asmjit::x86::ptr(asmjit::x86::rsp, -8));
-  // compiler2.TestRegister(RAX)
   write_interrupt_block();
 
-  //temp_disable_resume = (void*)(written.getRawBuffer() + written.getOffset());
   red_set_temp_resume((void*)(written.getRawBuffer() + written.getOffset()));
 
   return (void*)last_call_ret_addr;
@@ -624,7 +587,6 @@ void Tracer::TempEnableTrace(void *resume_pc) {
   set_pc((mem_loc_t)resume_pc);
   SimpleCompiler compiler(buffer);
   // the "normal" return address will be set to ris when this returns from the temp disabled region
-  //compiler.mov(asmjit::x86::rax, asmjit::x86::ptr(asmjit::x86::rsp, -8));
   compiler.TestRegister((mem_loc_t)&red_asm_jump_rsi, RSI, (register_t)resume_pc, &merge_block_stack.back());
   auto written = compiler.finalize();
   write_interrupt_block();
@@ -677,7 +639,6 @@ void* Tracer::BeginMergeBlock() {
   if(current_not_traced_call_addr != (mem_loc_t)&redmagic_begin_merge_block)
     return NULL;
   assert(icount - last_call_instruction < 2);
-  //assert(current_not_traced_call_addr == (mem_loc_t)&redmagic_begin_merge_block);
   buffer->setOffset(last_call_generated_op);
   mem_loc_t ret = buffer->getRawBuffer() + buffer->getOffset();
   // there are no instructions to generate for this
@@ -708,7 +669,6 @@ void* Tracer::EndMergeBlock() {
     }
 
     // the ending of this tracer instructions
-    //method_address_stack.clear();
     finish_patch();
     tracing_from = 0;
     merge_resume = 0;
@@ -723,6 +683,7 @@ void* Tracer::EndMergeBlock() {
     auto info = &manager->branches[head->trace_id];
     assert(info->tracer == this);
     head->tracer = info->tracer = nullptr;
+    head->is_compiled = true;
     info->traced_instruction_count += icount;
     if(info->longest_trace_instruction_count < icount)
       info->longest_trace_instruction_count = icount;

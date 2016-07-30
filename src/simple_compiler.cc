@@ -423,8 +423,13 @@ size_t SimpleCompiler::_relocCode(void* _dst, asmjit::Ptr baseAddress) const noe
     if(_labels[i]->exId == 0xAB0ADD00) {
       uint8_t *target = (uint8_t*)_labels[i]->exData;
       // check that in the same 4gb memory block
-      assert(((uint64_t)target & 0xffffffff00000000) == ((uint64_t)dst & 0xffffffff00000000));
-      int32_t buf_offset = target - dst;
+      // if(((uint64_t)target & 0xffffffff00000000) != ((uint64_t)dst & 0xffffffff00000000)) {
+      //   red_printf("failed same region check %#016lx %#016lx\n", target, dst);
+      //   assert(0);
+      // }
+      int64_t buf_offset_l = target - dst;
+      int32_t buf_offset = buf_offset_l; //target - dst;
+      assert(buf_offset == buf_offset_l);
       LabelLink *link = _labels[i]->links;
       // LabelLink *prev = nullptr;
       while(link) {

@@ -1,0 +1,149 @@
+* caused by the forward prediction
+==> 0x007fffe62cc6e8
+[  16105270     2850 0x000000004416c0]  push %rbp                              55                   PyInt_AsSsize_t
+[  16105271     2851 0x000000004416c1]  push %rbx                              53                   PyInt_AsSsize_t
+[  16105272     2852 0x000000004416c2]  sub $0x8, %rsp                         4883ec08             PyInt_AsSsize_t
+[  16105273     2853 0x000000004416c6]  test %rdi, %rdi                        4885ff               PyInt_AsSsize_t
+[  16105274     2854 0x000000004416c9]  jz 0x4417d0                            0f8401010000         PyInt_AsSsize_t
+[  16105275     2855 0x000000004416cf]  mov 0x8(%rdi), %rdx                    488b5708             PyInt_AsSsize_t
+[  16105276     2856 0x000000004416d3]  mov 0xa8(%rdx), %rax                   488b82a8000000       PyInt_AsSsize_t
+[  16105277     2857 0x000000004416da]  test $0x800000, %eax                   a900008000           PyInt_AsSsize_t
+[  16105278     2858 0x000000004416df]  jnz 0x441770                           0f858b000000         PyInt_AsSsize_t
+[  16105279     2859 0x000000004416e5]  test $0x1000000, %eax                  a900000001           PyInt_AsSsize_t
+[  16105280     2860 0x000000004416ea]  jnz 0x441760                           7574                 PyInt_AsSsize_t
+[  16105281     2861 0x000000004416ec]  mov 0x60(%rdx), %rax                   488b4260             PyInt_AsSsize_t
+[  16105282     2862 0x000000004416f0]  test %rax, %rax                        4885c0               PyInt_AsSsize_t
+[ *16105283     2863 0x000000004416f3]  jz 0x4417d0                            0f84d7000000         PyInt_AsSsize_t
+[  16105284     2864 0x000000004416f9]  mov 0x90(%rax), %rax                   488b8090000000       PyInt_AsSsize_t
+[  16105285     2865 0x00000000441700]  test %rax, %rax                        4885c0               PyInt_AsSsize_t
+[  16105286     2866 0x00000000441703]  jz 0x4417d0                            0f84c7000000         PyInt_AsSsize_t
+[  16105287     2867 0x00000000441709]  call *%rax                             ffd0                 PyInt_AsSsize_t
+==> 0x007fffe62cc6f0
+[  16105288     2868 0x000000004416cf]  mov 0x8(%rdi), %rdx                    488b5708             PyInt_AsSsize_t
+[  16105289     2869 0x000000004416d3]  mov 0xa8(%rdx), %rax                   488b82a8000000       PyInt_AsSsize_t
+[  16105290     2870 0x000000004416da]  test $0x800000, %eax                   a900008000           PyInt_AsSsize_t
+[  16105291     2871 0x000000004416df]  jnz 0x441770 (take this branch)        0f858b000000         PyInt_AsSsize_t
+[  16105292     2872 0x000000004416e5]  test $0x1000000, %eax                  a900000001           PyInt_AsSsize_t
+[  16105293     2873 0x000000004416ea]  jnz 0x441760                           7574                 PyInt_AsSsize_t
+[  16105294     2874 0x000000004416ec]  mov 0x60(%rdx), %rax                   488b4260             PyInt_AsSsize_t
+[  16105295     2875 0x000000004416f0]  test %rax, %rax                        4885c0               PyInt_AsSsize_t
+[  16105296     2876 0x000000004416f3]  jz 0x4417d0                            0f84d7000000         PyInt_AsSsize_t
+[  16105297     2877 0x000000004416f9]  mov 0x90(%rax), %rax                   488b8090000000       PyInt_AsSsize_t
+[  16105298     2878 0x00000000441700]  test %rax, %rax                        4885c0               PyInt_AsSsize_t
+[  16105299     2879 0x00000000441703]  jz 0x4417d0                            0f84c7000000         PyInt_AsSsize_t
+[  16105300     2880 0x00000000441709]  call *%rax                             ffd0                 PyInt_AsSsize_t
+==> 0x007fffe62cc6ff
+[  16105301     2881 0x00000000441770]  mov 0x10(%rdi), %rbp                   488b6f10             PyInt_AsSsize_t
+[  16105302     2882 0x00000000441774]  add $0x8, %rsp                         4883c408             PyInt_AsSsize_t
+[  16105303     2883 0x00000000441778]  pop %rbx                               5b                   PyInt_AsSsize_t
+[  16105304     2884 0x00000000441779]  mov %rbp, %rax                         4889e8               PyInt_AsSsize_t
+[  16105305     2885 0x0000000044177c]  pop %rbp                               5d                   PyInt_AsSsize_t
+[  16105306     2886 0x0000000044177d]  ret                                    c3                   PyInt_AsSsize_t
+==> 0x007fffe62cc715
+[  16105307     2887 0x0000000041fe38]  cmp $0xffffffffffffffff, %rax          4883f8ff             PyNumber_AsSsize_t
+[  16105308     2888 0x0000000041fe3c]  mov %rax, %r12                         4989c4               PyNumber_AsSsize_t
+[  16105309     2889 0x0000000041fe3f]  jz 0x41feb0                            746f                 PyNumber_AsSsize_t
+[  16105310     2890 0x0000000041fe41]  call 0x413b30                          e8ea3cffff           PyNumber_AsSsize_t
+==> 0x007fffe62cc726
+
+disabling the forward predictor prevents this crash from happening
+
+
+What the branches looks like full
+==> 0x007fffe62cc6e8
+[  16105270     2850 0x000000004416c0]  push %rbp                              55                   PyInt_AsSsize_t
+[  16105271     2851 0x000000004416c1]  push %rbx                              53                   PyInt_AsSsize_t
+[  16105272     2852 0x000000004416c2]  sub $0x8, %rsp                         4883ec08             PyInt_AsSsize_t
+[  16105273     2853 0x000000004416c6]  test %rdi, %rdi                        4885ff               PyInt_AsSsize_t
+[  16105274     2854 0x000000004416c9]  jz xxxxxxxx                            0f8401010000         PyInt_AsSsize_t
+[  16105288     2868 0x000000004416cf]  mov 0x8(%rdi), %rdx                    488b5708             PyInt_AsSsize_t
+[  16105289     2869 0x000000004416d3]  mov 0xa8(%rdx), %rax                   488b82a8000000       PyInt_AsSsize_t
+[  16105290     2870 0x000000004416da]  test $0x800000, %eax                   a900008000           PyInt_AsSsize_t
+[  16105291     2871 0x000000004416df]  j z xxxxxxxx (rewritten branch)        0f858b000000         PyInt_AsSsize_t
+[  16105301     2881 0x00000000441770]  mov 0x10(%rdi), %rbp                   488b6f10             PyInt_AsSsize_t
+[  16105302     2882 0x00000000441774]  add $0x8, %rsp                         4883c408             PyInt_AsSsize_t
+[  16105303     2883 0x00000000441778]  pop %rbx                               5b                   PyInt_AsSsize_t
+[  16105304     2884 0x00000000441779]  mov %rbp, %rax                         4889e8               PyInt_AsSsize_t
+[  16105305     2885 0x0000000044177c]  pop %rbp                               5d                   PyInt_AsSsize_t
+[  16105306     2886 0x0000000044177d]  ret  (add $8, %rsp)                    c3                   PyInt_AsSsize_t
+
+
+with the abort
+[  16105270     2850 0x000000004416c0]  push %rbp                              55                   PyInt_AsSsize_t
+[  16105271     2851 0x000000004416c1]  push %rbx                              53                   PyInt_AsSsize_t
+[  16105272     2852 0x000000004416c2]  sub $0x8, %rsp                         4883ec08             PyInt_AsSsize_t
+[  16105273     2853 0x000000004416c6]  test %rdi, %rdi                        4885ff               PyInt_AsSsize_t
+                                        jmp xxxxxxxxxx (resume normal program)
+
+
+
+* reduced the amount that the forward prediction will go:
+==> 0x007fffe62cc31a
+[  13488446     2145 0x0000000047331e]  mov 0x10(%rbx), %rax                   488b4310             lib=/home/matthew/developer/cpython/python
+[  13488447     2146 0x00000000473322]  cmp %rbp, %rax                         4839e8               lib=/home/matthew/developer/cpython/python
+[  13488448     2147 0x00000000473325]  jle 0x473490                           0f8e65010000         lib=/home/matthew/developer/cpython/python
+==> 0x007fffe62cc323
+[  13488449     2148 0x0000000047332b]  movzx 0x24(%rbx,%rbp), %eax            0fb6442b24           lib=/home/matthew/developer/cpython/python
+[  13488450     2149 0x00000000473330]  mov %al, 0x28(%rsp)                    88442428             lib=/home/matthew/developer/cpython/python
+[  13488451     2150 0x00000000473334]  mov 0x7dfba0(%rax,8), %rax             488b04c5a0fb7d00     lib=/home/matthew/developer/cpython/python
+[  13488452     2151 0x0000000047333c]  test %rax, %rax                        4885c0               lib=/home/matthew/developer/cpython/python
+[  13488453     2152 0x0000000047333f]  jz 0x4734f5                            0f84b0010000         lib=/home/matthew/developer/cpython/python
+==> 0x007fffe62cc330
+[  13488454     2153 0x00000000473345]  add $0x1, (%rax)                       48830001             lib=/home/matthew/developer/cpython/python
+[  13488455     2154 0x00000000473349]  add $0x38, %rsp                        4883c438             lib=/home/matthew/developer/cpython/python
+[  13488456     2155 0x0000000047334d]  pop %rbx                               5b                   lib=/home/matthew/developer/cpython/python
+[  13488457     2156 0x0000000047334e]  pop %rbp                               5d                   lib=/home/matthew/developer/cpython/python
+[ *13488458     2157 0x0000000047334f]  ret                                    c3                   lib=/home/matthew/developer/cpython/python
+==> 0x007fffe62cc34a
+[  13488459     2158 0x000000004b21f4]  mov %rax, 0x20(%rsp)                   4889442420           PyEval_EvalFrameEx
+[  13488460     2159 0x000000004b21f9]  call 0x413b30                          e83219f6ff           PyEval_EvalFrameEx
+==> 0x007fffe62cc358
+[  13488461     2160 0x00000000413b30]  jmp 0x38ea92(%rip)                     ff2592ea3800         lib=/home/matthew/developer/cpython/python
+==> 0x007fffe62cc35d
+[  13488462     2161 0x000000004b21fe]  sub $0x1, (%r14)                       49832e01             PyEval_EvalFrameEx
+[  13488463     2162 0x000000004b2202]  jz 0x4b6960                            0f8458470000         PyEval_EvalFrameEx
+==> 0x007fffe62cc35d
+[  13488464     2163 0x000000004b2208]  call 0x413e80                          e8731cf6ff           PyEval_EvalFrameEx
+[  13488465     2164 0x00000000413e80]  jmp 0x38e8ea(%rip)                     ff25eae83800         lib=/home/matthew/developer/cpython/python
+==> 0x007fffe62cc367
+[  13488466     2165 0x000000004b220d]  call 0x413b30                          e81e19f6ff           PyEval_EvalFrameEx
+[  13488467     2166 0x00000000413b30]  jmp 0x38ea92(%rip)                     ff2592ea3800         lib=/home/matthew/developer/cpython/python
+==> 0x007fffe62cc367
+[  13488468     2167 0x000000004b2212]  mov 0x10(%rsp), %rsi                   488b742410           PyEval_EvalFrameEx
+[  13488469     2168 0x000000004b2217]  mov (%rsi), %rax                       488b06               PyEval_EvalFrameEx
+[  13488470     2169 0x000000004b221a]  mov %rax, 0x18(%rsp)                   4889442418           PyEval_EvalFrameEx
+[  13488471     2170 0x000000004b221f]  sub $0x1, %rax                         4883e801             PyEval_EvalFrameEx
+[  13488472     2171 0x000000004b2223]  test %rax, %rax                        4885c0               PyEval_EvalFrameEx
+[  13488473     2172 0x000000004b2226]  mov %rax, (%rsi)                       488906               PyEval_EvalFrameEx
+[  13488474     2173 0x000000004b2229]  jz 0x4b6951                            0f8422470000         PyEval_EvalFrameEx
+
+what full branches look like:
+==> 0x007fffe62cc31a
+[  13488446     2145 0x0000000047331e]  mov 0x10(%rbx), %rax                   488b4310             lib=/home/matthew/developer/cpython/python
+[  13488447     2146 0x00000000473322]  cmp %rbp, %rax                         4839e8               lib=/home/matthew/developer/cpython/python
+[  13488448     2147 0x00000000473325]  jle xxxxxxxx (not taken)               0f8e65010000         lib=/home/matthew/developer/cpython/python
+[  13488449     2148 0x0000000047332b]  movzx 0x24(%rbx,%rbp), %eax            0fb6442b24           lib=/home/matthew/developer/cpython/python
+[  13488450     2149 0x00000000473330]  mov %al, 0x28(%rsp)                    88442428             lib=/home/matthew/developer/cpython/python
+[  13488451     2150 0x00000000473334]  mov 0x7dfba0(%rax,8), %rax             488b04c5a0fb7d00     lib=/home/matthew/developer/cpython/python
+[  13488452     2151 0x0000000047333c]  test %rax, %rax                        4885c0               lib=/home/matthew/developer/cpython/python
+[  13488453     2152 0x0000000047333f]  jnz xxxxxxxx (branch taken)            0f84b0010000         lib=/home/matthew/developer/cpython/python
+[  13488454     2153 0x00000000473345]  add $0x1, (%rax)                       48830001             lib=/home/matthew/developer/cpython/python
+[  13488455     2154 0x00000000473349]  add $0x38, %rsp                        4883c438             lib=/home/matthew/developer/cpython/python
+[  13488456     2155 0x0000000047334d]  pop %rbx                               5b                   lib=/home/matthew/developer/cpython/python
+[  13488457     2156 0x0000000047334e]  pop %rbp                               5d                   lib=/home/matthew/developer/cpython/python
+[ *13488458     2157 0x0000000047334f]  ret     (add $8, %rsp)                 c3                   lib=/home/matthew/developer/cpython/python
+
+with the abort
+[  13488446     2145 0x0000000047331e]  mov 0x10(%rbx), %rax                   488b4310             lib=/home/matthew/developer/cpython/python
+[  13488447     2146 0x00000000473322]  cmp %rbp, %rax                         4839e8               lib=/home/matthew/developer/cpython/python
+[  13488448     2147 0x00000000473325]  jle xxxxxxxx (not taken)               0f8e65010000         lib=/home/matthew/developer/cpython/python
+[  13488449     2148 0x0000000047332b]  movzx 0x24(%rbx,%rbp), %eax            0fb6442b24           lib=/home/matthew/developer/cpython/python
+[  13488450     2149 0x00000000473330]  mov %al, 0x28(%rsp)                    88442428             lib=/home/matthew/developer/cpython/python
+[  13488451     2150 0x00000000473334]  mov 0x7dfba0(%rax,8), %rax             488b04c5a0fb7d00     lib=/home/matthew/developer/cpython/python
+[  13488452     2151 0x0000000047333c]  test %rax, %rax                        4885c0               lib=/home/matthew/developer/cpython/python
+[  13488453     2152 0x0000000047333f]  jnz xxxxxxxx (branch taken)            0f84b0010000         lib=/home/matthew/developer/cpython/python
+[  13488454     2153 0x00000000473345]  add $0x1, (%rax)                       48830001             lib=/home/matthew/developer/cpython/python
+[  13488455     2154 0x00000000473349]  add $0x38, %rsp                        4883c438             lib=/home/matthew/developer/cpython/python
+[  13488456     2155 0x0000000047334d]  pop %rbx                               5b                   lib=/home/matthew/developer/cpython/python
+[  13488457     2156 0x0000000047334e]  pop %rbp                               5d                   lib=/home/matthew/developer/cpython/python
+                                        jmp xxxxxxxx resume program

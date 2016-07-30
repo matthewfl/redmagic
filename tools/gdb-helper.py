@@ -23,19 +23,26 @@ class TraceJumps(gdb.Command):
         redmagic_start = int(redmagic_info[0], 16)
         redmagic_end = int(redmagic_info[1], 16)
 
-        verbose = True
+        verbose = False
 
         branches_taken = []
 
         def get_rip():
             return int(gdb.parse_and_eval('$rip'))
 
+        # so that we can determine where it is resuming the trace
+        gdb.execute('break red_asm_resume_eval_block')
+
         current_rip = get_rip()
 
         while True:
             last_rip = current_rip
-            if not verbose or redmagic_start < last_rip < redmagic_end:
-                gdb.execute('n', to_string=True)
+            if not verbose and redmagic_start < last_rip < redmagic_end:
+                li = gdb.execute('x/i {}'.format(last_rip), to_string=True)
+                if 'red_asm_resume_eval_block' in li:
+                    gdb.execute('si', to_string=True)
+                else:
+                    gdb.execute('n', to_string=True)
                 current_rip = get_rip()
             else:
                 gdb.execute('si', to_string=True)
@@ -43,7 +50,7 @@ class TraceJumps(gdb.Command):
                 if not (0 < current_rip - last_rip < 15):
                     # then we probably have taken a branch or something
                     li = gdb.execute('x/i {}'.format(last_rip), to_string=True)
-                    if verbose or '__tls_get_addr' not in li:
+                    if verbose or ('__tls_get_addr' not in li and '_dl_addr' not in li):
                         #branches_taken.append(li)
                         gdb.write(li)
 
