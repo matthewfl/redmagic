@@ -31,6 +31,8 @@ namespace redmagic {
 
   thread_local uint32_t this_thread_id = 0;
 
+  thread_local int32_t branchable_frame_id = -1;
+
 #ifdef CONF_GLOBAL_ABORT
   extern long global_icount_abort;
 #endif
@@ -45,6 +47,7 @@ public:
     protected_malloc = false;
   }
   ~UnprotectMalloc() {
+    assert(protected_malloc == false);
     protected_malloc = pstate;
   }
 };
@@ -77,9 +80,7 @@ extern "C" void* red_user_fellthrough_branch(void *id, void *ret_addr) {
 
 extern "C" void* red_user_ensure_not_traced(void *_, void *ret_addr) {
   // TODO:
-  auto head = manager->get_tracer_head();
-  assert(!head->is_traced);
-  return NULL;
+  return manager->ensure_not_traced();
 }
 
 extern "C" void* red_user_temp_disable(void *_, void *ret_addr) {
@@ -108,6 +109,17 @@ extern "C" void* red_user_begin_merge_block(void *_, void *ret_addr) {
 extern "C" void* red_user_end_merge_block(void *_, void *ret_addr) {
   UnprotectMalloc upm;
   return manager->end_merge_block();
+}
+
+extern "C" void* red_user_begin_branchable_frame(void *_, void *ret_addr) {
+  UnprotectMalloc upm;
+  branchable_frame_id++;
+  return NULL;
+}
+
+extern "C" void* red_user_end_branchable_frame(void *_, void *ret_addr) {
+  UnprotectMalloc upm;
+  return manager->end_branchable_frame(ret_addr);
 }
 
 extern "C" void *__real_malloc(size_t);
@@ -181,6 +193,8 @@ static const char *avoid_inlining_methods[] = {
   "redmagic_do_not_trace_function",
   "redmagic_begin_merge_block",
   "redmagic_end_merge_block",
+  "redmagic_begin_branchable_frame",
+  "redmagic_end_branchable_frame",
   NULL,
 };
 
@@ -259,6 +273,7 @@ void* Manager::begin_trace(void *id, void *ret_addr) {
     new_head->tracer = l = new Tracer(buff);
     l->tracing_from = (mem_loc_t)trace_pc;
     l->owning_thread = get_thread_id();
+    l->owning_frame_id = branchable_frame_id;
     // int r = mprotect(this, 4*1024, PROT_READ | PROT_WRITE);
     // assert(!r);
     info->tracer = l;
@@ -330,8 +345,9 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
   Tracer *l;
   void* start_addr = ret_addr;
   auto info = &branches[id];
-  if(head->trace_id == id) {
+  if(head->trace_id == id && head->frame_id == branchable_frame_id) {
     if(head->is_traced) {
+      assert(!info->disabled);
 #ifdef CONF_GLOBAL_ABORT
       //assert(!head->did_abort);
 #endif
@@ -375,7 +391,23 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
     head = &threadl_tracer_stack[threadl_tracer_stack.size() - 2];
     new_head->trace_id = id;
     if(info->starting_point) {
-      assert(!info->tracer || info->tracer->did_abort);
+      if(info->tracer && !info->tracer->did_abort) {
+        // then this must be some recursive frame or another thread is tracing this
+#ifndef NDEBUG
+        if(info->tracer->owning_thread == get_thread_id()) {
+          // this is a recursive frame
+          for(auto t : threadl_tracer_stack) {
+            if(t.trace_id == id) {
+              // we found this that was tracing from
+              assert(t.frame_id != branchable_frame_id);
+              return start_addr;
+            }
+          }
+          assert(0);
+        }
+#endif
+        return start_addr;
+      }
       new_head->is_compiled = true;
       new_head->is_traced = true;
 #ifdef CONF_VERBOSE
@@ -421,6 +453,7 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
   info->tracer = new_head->tracer = l = new Tracer(buff);
   l->tracing_from = (mem_loc_t)start_addr;
   l->owning_thread = get_thread_id();
+  l->owning_frame_id = branchable_frame_id;
   void *ret = l->Start(start_addr);
   new_head->is_traced = true;
   info->starting_point = l->get_start_location();
@@ -428,113 +461,6 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
 
   return ret;
 
-
-
-  /*
-  //return NULL;
-  auto head = get_tracer_head();
-  if(head->is_traced) {
-    assert(head->tracer || head->did_abort);
-    if(id == head->trace_id) {
-      auto info = &branches[id];
-#ifdef CONF_GLOBAL_ABORT
-      if(head->did_abort) {
-        red_printf("starting a previously aborted trace\n");
-        return info->starting_point;
-      }
-
-      if(head->is_compiled) {
-        // then there must have been an abort that has us here
-        return info->starting_point;
-      }
-#endif
-
-      assert(!head->is_compiled);
-      assert(head->tracer == info->tracer);
-      assert(!info->disabled);
-      void *ret = head->tracer->EndTraceLoop();
-      head->is_compiled = true;
-      Tracer *l = head->tracer;
-      info->tracer = head->tracer = nullptr;
-
-      Tracer *expected = nullptr;
-      if(!free_tracer_list.compare_exchange_strong(expected, l)) {
-        // failled to save the tracer to the free list head
-        delete l;
-      }
-
-      // We are continuing the loop so there is no need to check the parent stack frame
-      //pop_tracer_stack();
-      //auto new_head = get_tracer_head();
-      //assert(new_head->resume_addr == nullptr); // TODO: handle resuming previous tracer
-      return ret;
-    } else {
-      // then we should make a new tracer and jump to that
-      auto info = &branches[id];
-      if(info->starting_point) {
-        assert(!info->tracer || info->tracer->did_abort); // that we are done with this
-        auto new_head = push_tracer_stack();
-        if(head->tracer && !head->tracer->did_abort)
-          head->tracer->JumpToNestedLoop(id);
-        else
-          new_head->did_abort = !!head->tracer;
-        new_head->is_compiled = true;
-        new_head->is_traced = true;
-        new_head->trace_id = id;
-        return info->starting_point;
-      }
-      return begin_trace(id, ret_addr);
-    }
-  } else {
-    branch_info *info = &branches[id];
-
-    if(info->disabled) {
-      // this loop is disabled
-      return NULL;
-    }
-
-    if(info->tracer != nullptr) {
-      // there is already a tracer with some other thread running on this item
-      // which means that we are going to wait for that thread to finish its trace
-      // TODO: make this use atomics
-
-      // TODO: if this aborted, then need to make this have written the resume block at the bottom and
-      if(info->tracer->did_abort) {
-#ifdef CONF_VERBOSE
-        red_printf("previous attempt aborted %x\n", id);
-#endif
-#ifdef CONF_GLOBAL_ABORT
-        auto head = push_tracer_stack();
-        head->is_compiled = true;
-        head->is_traced = true;
-        head->trace_id = id;
-        head->did_abort = true;
-        return info->starting_point;
-#endif
-      }
-      return NULL;
-    }
-    // if the tracer is null then it either isn't being traced, hasn't started yet or has already finished
-    if(info->starting_point != nullptr) {
-      // with tracer == null and starting not null then we have already finished this trace so jump to it
-      auto head = push_tracer_stack();
-      head->is_compiled = true;
-      head->is_traced = true;
-      head->trace_id = id;
-#ifdef CONF_VERBOSE
-      red_printf("entering trace %x\n", id);
-#endif
-      return info->starting_point;
-    }
-    // don't care about atomic since we are just trying to get an estimate, so if we lose some counts it is fine
-    int cnt = info->count++;
-
-    if(cnt > CONF_NUMBER_OF_JUMPS_BEFORE_TRACE) {
-      return begin_trace(id, ret_addr);
-    }
-  }
-  return NULL;
-  */
 }
 
 void* Manager::fellthrough_branch(void *id, void *ret_addr) {
@@ -545,7 +471,7 @@ void* Manager::fellthrough_branch(void *id, void *ret_addr) {
   Tracer *l;
   void *ret = NULL;
   auto head = get_tracer_head();
-  if(head->trace_id == id) {
+  if(head->trace_id == id && head->frame_id == branchable_frame_id) {
     auto info = &branches[id];
     if(head->is_traced) {
       assert(!head->is_compiled);
@@ -589,30 +515,17 @@ void* Manager::fellthrough_branch(void *id, void *ret_addr) {
     // got to the backwards branch portion of this loop
     assert(!head->is_compiled);
     assert(head->tracer);
-    return head->tracer->DeleteLastCall();
+    if(head->frame_id == branchable_frame_id) {
+      return head->tracer->CheckNotSelfFellthrough();
+    } else {
+      // if this is at a different level in the branchable frame then it can't possible be the same instance
+      // and the check self will only check the id not the branchable depth
+      return head->tracer->DeleteLastCall();
+    }
   }
 
   return NULL;
 
-  /*
-  if(head->trace_id == id && head->is_traced) {
-    return end_trace(id, ret_addr);
-    // branch_info *info = &branches[id];
-    // void *ret;
-    // Tracer *l = head->tracer;
-    // ret = l->EndTraceFallThrough();
-    // auto old_head = pop_tracer_stack();
-    // auto new_head = get_tracer_head();
-    // // TODO: handle how to resume the previous tracer?
-    // assert(new_head->resume_addr == nullptr);
-    // // is_traced = false;
-    // // trace_id = nullptr;
-    // //info->starting_point = l->get_loop_location();
-    // info->tracer = nullptr;
-    // //l->tracing_from.store(0);
-    // return ret;
-  }
-  */
 }
 
 void* Manager::temp_disable(void *ret_addr) {
@@ -702,21 +615,79 @@ void Manager::disable_branch(void *id) {
   }
 }
 
+void* Manager::ensure_not_traced() {
+  auto head = get_tracer_head();
+  assert(!head->is_traced);
+  assert(!head->is_temp_disabled);
+  if(head->trace_id) {
+    auto info = &branches[head->trace_id];
+    info->disabled = true;
+  }
+  return NULL;
+}
+
+void* Manager::end_branchable_frame(void *ret_addr) {
+#ifdef CONF_ALLOW_UNCLOSED_TRACES
+  // check if the current trace should be finished out
+  // if so, have it fallthrough and then run the corresponding block of code
+  // if there are multiple traces then this method will end up getting call once per each trace that needs to be cleaned up
+  auto head = get_tracer_head();
+  while(head->frame_id >= branchable_frame_id) {
+    assert(!head->is_compiled);
+    if(head->is_traced) {
+      auto info = &branches[head->trace_id];
+      assert(info->tracer == head->tracer);
+      Tracer *l = head->tracer;
+      // poping off the stack and possibly resuming the next tracer will be handled inside of this
+      void *ret = l->EndTraceEndBranchable();
+      head->tracer = info->tracer = nullptr;
+
+      Tracer *expected = nullptr;
+      if(!free_tracer_list.compare_exchange_strong(expected, l)) {
+        // failled to save the tracer to the free list head
+        delete l;
+      }
+
+      // this method will get call again with this current frame poped
+      return ret;
+    }
+    pop_tracer_stack();
+    head = get_tracer_head();
+  }
+#endif
+  branchable_frame_id--;
+  assert(get_tracer_head()->frame_id <= branchable_frame_id);
+  return NULL;
+}
+
 uint32_t Manager::tracer_stack_size() {
   return threadl_tracer_stack.size();
 }
 
 tracer_stack_state* Manager::push_tracer_stack() {
   tracer_stack_state e;
+  e.frame_id = branchable_frame_id;
   threadl_tracer_stack.push_back(e);
   return stack_head = &threadl_tracer_stack.back();
 }
 
 tracer_stack_state Manager::pop_tracer_stack() {
   auto r = threadl_tracer_stack.back();
+  assert(r.frame_id == branchable_frame_id);
   threadl_tracer_stack.pop_back();
   assert(!threadl_tracer_stack.empty());
   stack_head = &threadl_tracer_stack.back();
+
+  // for(;;) {
+  //   if(stack_head->trace_id) {
+  //     auto info = &branches[stack_head->trace_id];
+  //     if(info->disabled) {
+  //       assert(0);
+  //       continue;
+  //     }
+  //   }
+  //   break;
+  // }
   return r;
 }
 

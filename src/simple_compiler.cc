@@ -150,7 +150,7 @@ void SimpleCompiler::SetRegister(int reg, register_t val) {
   mov(get_register(reg), imm_u(val));
 }
 
-CodeBuffer SimpleCompiler::TestRegister(mem_loc_t resume_pc, int reg, register_t val, mem_loc_t *merge_addr) {
+CodeBuffer SimpleCompiler::TestRegister(mem_loc_t resume_pc, int reg, register_t val, mem_loc_t *merge_addr, uint32_t _comp_op) {
   auto r = get_register(reg);
   asmjit::X86GpReg scr;
   if(val > 0x7fffffff)
@@ -174,7 +174,8 @@ CodeBuffer SimpleCompiler::TestRegister(mem_loc_t resume_pc, int reg, register_t
   } else {
     cmp(r, imm_u(val));
   }
-  jne(failure);
+  //jne(failure);
+  emit(_comp_op, failure);
   popf();
   //jmp(imm_u(0xfafafafafafafafa));
   // jmp(failure);

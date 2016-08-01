@@ -58,7 +58,7 @@ namespace redmagic {
     void* backwards_branch(void *id, void *ret_addr);
     void* fellthrough_branch(void *id, void *ret_addr);
 
-    void ensure_not_traced();
+    // void ensure_not_traced();
 
     void *temp_disable(void *ret_addr);
     void *temp_enable(void *ret_addr);
@@ -72,7 +72,9 @@ namespace redmagic {
 
     void do_not_trace_method(void *addr);
 
+    void* ensure_not_traced();
 
+    void* end_branchable_frame(void *ret_addr);
 
     uint32_t get_thread_id();
 
@@ -121,6 +123,7 @@ namespace redmagic {
     bool is_temp_disabled = false;
     bool is_traced = false;
     bool is_compiled = false;
+    int32_t frame_id = -1;
     //bool did_abort = false;
   };
 
@@ -131,6 +134,7 @@ namespace redmagic {
   extern Manager *manager;
   extern thread_local bool protected_malloc;
   extern std::atomic<Tracer*> free_tracer_list;
+  extern thread_local int32_t branchable_frame_id;
 
 
   class CodeBuffer final {
@@ -149,6 +153,8 @@ namespace redmagic {
     CodeBuffer(CodeBuffer &&x);
 
     ~CodeBuffer();
+
+    CodeBuffer& operator=(CodeBuffer &&x);
 
     //void *getBuffer() { return buffer; }
     const inline size_t getSize() { return size - trampolines_size + external_trampolines_size; }

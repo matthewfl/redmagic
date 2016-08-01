@@ -26,11 +26,19 @@ namespace redmagic {
     void Run(struct user_regs_struct*);
 
     // we are done with the loop, so resume normal execution
-    void* EndTraceFallthrough();
+    void* EndTraceFallthrough(bool check_id=true);
     // if this was a nested trace then we want to branch back to the main trace
     //void *EndTraceFallthroughNestedLoop(void *target_addr);
     // we are jumping back to the top of the loop, so do that
     void* EndTraceLoop();
+
+    // if there was a fallthrough statement called but with not our own branch
+    // check that it can't possibly be our own loop
+    void* CheckNotSelfFellthrough();
+
+    // ending a branchable block (eval frame) so all tracers that are left alive atm
+    // need to have their proper fallthrough methods called
+    void* EndTraceEndBranchable();
 
     // if there is another backwards branch inside of this backwards branch
     // the there is a nested loop that we should trace
@@ -136,6 +144,8 @@ namespace redmagic {
   public:
     std::atomic<mem_loc_t> tracing_from;
     uint32_t owning_thread;
+    int32_t owning_frame_id;
+
 
     bool did_abort = false;
 
@@ -183,7 +193,9 @@ namespace redmagic {
     int64_t last_call_instruction = -1;
     size_t last_call_generated_op; // where we have the corresponding gened ops (eg push ret addr)
     mem_loc_t last_call_ret_addr;
+    mem_loc_t last_call_pc;
     mem_loc_t current_not_traced_call_addr = 0; // address of the call that is currently being execuited if we aren't tracing
+    mem_loc_t *current_not_traced_call_ret_loc = nullptr;
 
     mem_loc_t trace_start_location; // where this current trace begins
     //mem_loc_t loop_start_location; // where it should branch the loop back to

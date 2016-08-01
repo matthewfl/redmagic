@@ -74,8 +74,8 @@ Tracer::Tracer(CodeBuffer* buffer) {
 
   interrupt_block_location = written.getRawBuffer();
 
-  method_address_stack.reserve(100);
-  merge_block_stack.reserve(100);
+  method_address_stack.reserve(500);
+  merge_block_stack.reserve(500);
   merge_block_stack.push_back(0);
 
   tracing_from = 0;
@@ -152,6 +152,7 @@ extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_addr
   head->is_compiled = false;
 
   l->owning_thread = manager->get_thread_id();
+  l->owning_frame_id = branchable_frame_id;
 
   // calling Start will invalidate the previous stack
   ret = l->Start((void*)target_rip);
@@ -207,7 +208,7 @@ extern "C" void* red_branch_to_sub_trace(void *resume_addr, void *sub_trace_id, 
   assert(!head->tracer);
   assert(head->resume_addr == nullptr);
   head->resume_addr = resume_addr;
-  assert(sub_trace_id != head->trace_id);
+  assert(sub_trace_id != head->trace_id || head->frame_id != branchable_frame_id);
 
   protected_malloc = false;
   void *ret = manager->backwards_branch(sub_trace_id, target_rip);
@@ -487,7 +488,7 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
 
 extern "C" void red_asm_end_trace();
 
-void* Tracer::EndTraceFallthrough() {
+void* Tracer::EndTraceFallthrough(bool check_id) {
   assert(current_not_traced_call_addr == (mem_loc_t)&redmagic_fellthrough_branch ||
          current_not_traced_call_addr == (mem_loc_t)&redmagic_force_end_trace);
   current_not_traced_call_addr = 0;
@@ -505,9 +506,21 @@ void* Tracer::EndTraceFallthrough() {
 
   buffer->setOffset(last_call_generated_op);
   SimpleCompiler compiler(buffer);
+  // check that the fallthrough option is actually this trace
+  auto rlabel = compiler.newLabel();
+  CodeBuffer wb;
+  if(check_id) {
+    wb = compiler.TestRegister(last_call_pc, RDI, (register_t)head->trace_id, &merge_block_stack.back());
+    compiler.restore_registers();
+  }
+  // have to ignore this ^ now since we are going to be clobbering this register
+  compiler.bind(rlabel);
   compiler.mov(asmjit::x86::rdi, asmjit::imm_u(last_call_ret_addr));
   compiler.jmp(asmjit::imm_ptr(&red_asm_end_trace));
   auto w = compiler.finalize();
+  if(check_id) {
+    wb.replace_stump<uint64_t>(0xfafafafafafafafa, w.getRawBuffer());
+  }
   assert(merge_block_stack.size() == 1);
   mem_loc_t write_addr = merge_block_stack[0];
   merge_block_stack[0] = 0;
@@ -520,7 +533,7 @@ void* Tracer::EndTraceFallthrough() {
   method_address_stack.clear();
   finish_patch();
   tracing_from = 0;
-  return (void*)w.getRawBuffer();
+  return (uint8_t*)w.getRawBuffer() + compiler.getLabelOffset(rlabel);
 }
 
 void* Tracer::EndTraceLoop() {
@@ -544,7 +557,12 @@ void* Tracer::EndTraceLoop() {
 
   buffer->setOffset(last_call_generated_op);
   SimpleCompiler compiler(buffer);
+  // check that we are still backwards branching on the correct trace
+  auto wb = compiler.TestRegister(last_call_pc, RDI, (register_t)head->trace_id, &merge_block_stack.back());
+  compiler.restore_registers();
   compiler.jmp(asmjit::imm_ptr(loop_location));
+  auto written = compiler.finalize();
+  wb.replace_stump<uint64_t>(0xfafafafafafafafa, written.getRawBuffer());
   assert(merge_block_stack.size() == 1);
   assert(merge_resume == 0);
   mem_loc_t write_addr = merge_block_stack[0];
@@ -560,6 +578,38 @@ void* Tracer::EndTraceLoop() {
   tracing_from = 0;
   return (void*)loop_location;
 }
+
+void* Tracer::CheckNotSelfFellthrough() {
+  assert(current_not_traced_call_addr == (mem_loc_t)&redmagic_fellthrough_branch);
+  current_not_traced_call_addr = 0;
+  assert(icount - last_call_instruction < 2);
+
+  auto head = manager->get_tracer_head();
+  buffer->setOffset(last_call_generated_op);
+  SimpleCompiler compiler(buffer);
+  auto wb = compiler.TestRegister(last_call_pc, RDI, (register_t)head->trace_id, &merge_block_stack.back(), asmjit::kX86InstIdJe);
+  auto w = compiler.finalize();
+  wb.replace_stump<uint64_t>(0xfafafafafafafafa, w.getRawBuffer());
+  write_interrupt_block();
+
+  return (uint8_t*)w.getRawBuffer() + w.getOffset();
+}
+
+void* Tracer::EndTraceEndBranchable() {
+  assert(current_not_traced_call_addr == (mem_loc_t)&redmagic_end_branchable_frame);
+  current_not_traced_call_addr = 0;
+  assert(icount - last_call_instruction < 2);
+
+  // set it such that the next tracer that resumes will also hit the end branchable method
+  // this will keep repeating until all the tracers in this frame have fallen
+  last_call_ret_addr = last_call_pc;
+
+  // to get around the assert
+  current_not_traced_call_addr = (mem_loc_t)&redmagic_fellthrough_branch;
+  return EndTraceFallthrough(false);
+}
+
+
 
 void* Tracer::TempDisableTrace() {
   assert(current_not_traced_call_addr == (mem_loc_t)&redmagic_temp_disable);
@@ -1354,9 +1404,11 @@ void Tracer::evaluate_instruction() {
         write_interrupt_block();
         cont_addr = written.getRawBuffer();
       }
+      current_not_traced_call_ret_loc = (mem_loc_t*)(regs_struct->rsp + move_stack_by - sizeof(register_t));
       current_not_traced_call_addr = jump_dest;
       continue_program(cont_addr);
       current_not_traced_call_addr = 0;
+      current_not_traced_call_ret_loc = nullptr;
       return;
 
     }
@@ -1456,6 +1508,7 @@ void Tracer::evaluate_instruction() {
 
     last_call_generated_op = buffer->getOffset();
     last_call_ret_addr = ret_addr;
+    last_call_pc = ud_insn_off(&disassm);
 
     if(!redmagic::manager->should_trace_method((void*)call_pc)) {
       // check if this is some method that we should avoid inlining
@@ -1474,9 +1527,11 @@ void Tracer::evaluate_instruction() {
         write_interrupt_block();
         cont_addr = cb.getRawBuffer();
       }
+      current_not_traced_call_ret_loc = (mem_loc_t*)(regs_struct->rsp + move_stack_by - sizeof(register_t));
       current_not_traced_call_addr = call_pc;
       continue_program(cont_addr);
       current_not_traced_call_addr = 0;
+      current_not_traced_call_ret_loc = nullptr;
 
     } else {
       // inline this method, so push the return address and continue

@@ -19,6 +19,13 @@ void redmagic_backwards_branch(void *);
 // we were at a backwards branch instruction but didn't take it
 void redmagic_fellthrough_branch(void *);
 
+// to be call at the start and end of interperter frames
+// will be used to identify recursive methods etc
+
+void redmagic_begin_branchable_frame(void);
+void redmagic_end_branchable_frame(void);
+
+
 // control forcing an the JIT to start a trace of this thread
 void redmagic_force_begin_trace(void *);
 void redmagic_force_end_trace(void *);

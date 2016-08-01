@@ -48,3 +48,5 @@ USER_INTERFACE(temp_enable);
 USER_INTERFACE(is_traced);
 USER_INTERFACE(begin_merge_block);
 USER_INTERFACE(end_merge_block);
+USER_INTERFACE(begin_branchable_frame);
+USER_INTERFACE(end_branchable_frame);

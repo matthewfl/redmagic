@@ -45,7 +45,7 @@ namespace redmagic {
     void PushMemoryLocationValue(mem_loc_t where);
     void Push64bitValue(uint64_t value);
 
-    CodeBuffer TestRegister(mem_loc_t resume_pc, int reg, register_t val, mem_loc_t *merge_addr);
+    CodeBuffer TestRegister(mem_loc_t resume_pc, int reg, register_t val, mem_loc_t *merge_addr, uint32_t _comp_op=asmjit::kX86InstIdJne);
     CodeBuffer TestMemoryLocation(mem_loc_t resume_pc, mem_loc_t where, register_t val, mem_loc_t *merge_addr);
 
     CodeBuffer TestOperand(mem_loc_t resume_pc, const asmjit::Operand& opr, register_t val, mem_loc_t *merge_addr);
