@@ -117,9 +117,9 @@ extern "C" void* red_user_begin_branchable_frame(void *_, void *ret_addr) {
   return NULL;
 }
 
-extern "C" void* red_user_end_branchable_frame(void *_, void *ret_addr) {
+extern "C" void* red_user_end_branchable_frame(void *_, void *ret_addr, void **stack_ptr) {
   UnprotectMalloc upm;
-  return manager->end_branchable_frame(ret_addr);
+  return manager->end_branchable_frame(ret_addr, stack_ptr);
 }
 
 extern "C" void *__real_malloc(size_t);
@@ -626,12 +626,15 @@ void* Manager::ensure_not_traced() {
   return NULL;
 }
 
-void* Manager::end_branchable_frame(void *ret_addr) {
+void* Manager::end_branchable_frame(void *ret_addr, void **stack_ptr) {
 #ifdef CONF_ALLOW_UNCLOSED_TRACES
   // check if the current trace should be finished out
   // if so, have it fallthrough and then run the corresponding block of code
   // if there are multiple traces then this method will end up getting call once per each trace that needs to be cleaned up
   auto head = get_tracer_head();
+  // assert that this return address actually came from a call instead of a tail optimized jmp, b/c life is bad...
+  assert(head->is_traced || ((uint8_t*)ret_addr)[-5] == 0xE8);
+  assert(ret_addr == *stack_ptr);
   while(head->frame_id >= branchable_frame_id) {
     assert(!head->is_compiled);
     if(head->is_traced) {
@@ -650,9 +653,21 @@ void* Manager::end_branchable_frame(void *ret_addr) {
 
       // this method will get call again with this current frame poped
       return ret;
+    } else {
+      pop_tracer_stack();
+      head = get_tracer_head();
+      if(head->resume_addr) {
+        if(head->tracer) {
+          head->tracer->JumpFromNestedLoop((uint8_t*)ret_addr - 5); // backup the pc to the call instruction
+        }
+        // reset what the stack has the return address as since when resuming the trace it will check that the "normal" rip is the same as where
+        // it expects to start
+        *stack_ptr = (uint8_t*)ret_addr - 5;
+        void *ret = head->resume_addr;
+        head->resume_addr = nullptr;
+        return ret;
+      }
     }
-    pop_tracer_stack();
-    head = get_tracer_head();
   }
 #endif
   branchable_frame_id--;

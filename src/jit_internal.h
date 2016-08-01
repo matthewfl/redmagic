@@ -74,7 +74,7 @@ namespace redmagic {
 
     void* ensure_not_traced();
 
-    void* end_branchable_frame(void *ret_addr);
+    void* end_branchable_frame(void *ret_addr, void **stack_ptr);
 
     uint32_t get_thread_id();
 
