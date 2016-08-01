@@ -202,6 +202,18 @@ extern "C" void* red_end_trace(mem_loc_t normal_end_address) {
   return ret;
 }
 
+extern "C" void red_end_trace_ensure() {
+  auto head = manager->get_tracer_head();
+  assert(head->is_traced);
+  head->is_traced = false;
+  head->is_compiled = false;
+  assert(!head->resume_addr);
+  assert(!head->tracer);
+#ifdef CONF_VERBOSE
+  red_printf("exiting trace ensure %#016lx\n", head->trace_id);
+#endif
+}
+
 extern "C" void* red_branch_to_sub_trace(void *resume_addr, void *sub_trace_id, void* target_rip) {
   auto head = manager->get_tracer_head();
   assert(head->is_traced);
@@ -607,6 +619,52 @@ void* Tracer::EndTraceEndBranchable() {
   // to get around the assert
   current_not_traced_call_addr = (mem_loc_t)&redmagic_fellthrough_branch;
   return EndTraceFallthrough(false);
+}
+
+void* Tracer::EndTraceEnsure() {
+  if(current_not_traced_call_addr != (mem_loc_t)&redmagic_ensure_not_traced) {
+    // then this is probably inside some not trace method block
+    // which is fine I guess
+    return NULL;
+  }
+  current_not_traced_call_addr = 0;
+  assert(icount - last_call_instruction < 2);
+
+#ifdef CONF_VERBOSE
+  red_printf("tracer end ensure\n");
+#endif
+
+
+  auto head = manager->get_tracer_head();
+  auto info = &manager->branches[head->trace_id];
+  info->traced_instruction_count += icount;
+  info->finish_traces++;
+  if(info->longest_trace_instruction_count < icount)
+    info->longest_trace_instruction_count = icount;
+
+  buffer->setOffset(last_call_generated_op);
+  SimpleCompiler compiler(buffer);
+  compiler.call(asmjit::imm_ptr(&red_end_trace_ensure));
+  compiler.jmp(asmjit::imm_ptr(last_call_ret_addr));
+  auto w = compiler.finalize();
+
+  merge_resume = 0;
+  while(merge_block_stack.size() > 0) {
+    mem_loc_t write_addr = merge_block_stack.back();
+    merge_block_stack.pop_back();
+    while(write_addr != 0) {
+      mem_loc_t next_addr = *(mem_loc_t*)write_addr;
+      *(mem_loc_t*)write_addr = 0;
+      write_addr = next_addr;
+    }
+  }
+  merge_block_stack.push_back(0);
+  method_address_stack.clear();
+
+  finish_patch();
+  tracing_from = 0;
+
+  return (void*)w.getRawBuffer();
 }
 
 

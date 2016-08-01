@@ -40,6 +40,10 @@ namespace redmagic {
     // need to have their proper fallthrough methods called
     void* EndTraceEndBranchable();
 
+    // drop all the way back to normal code, used with ensure not traced
+    // trace may end up getting resumed on backwards branch or fellthrough branch operation
+    void* EndTraceEnsure();
+
     // if there is another backwards branch inside of this backwards branch
     // the there is a nested loop that we should trace
     void JumpToNestedLoop(void *nested_trace_id);

@@ -617,12 +617,35 @@ void Manager::disable_branch(void *id) {
 
 void* Manager::ensure_not_traced() {
   auto head = get_tracer_head();
-  assert(!head->is_traced);
-  assert(!head->is_temp_disabled);
-  if(head->trace_id) {
+  if(head->is_traced) {
+    if(head->is_compiled) {
+      // must be in the context of a not traced function
+      // which doesn't have any external viewable info (except maybe ret addr doesn't point to some code buffer.....)
+      return NULL;
+    }
     auto info = &branches[head->trace_id];
-    info->disabled = true;
+    Tracer *l = head->tracer;
+    assert(info->tracer == head->tracer);
+    void *ret = l->EndTraceEnsure();
+    if(ret == NULL) {
+      // this must be a not inlined function which is fine I guess?
+      return NULL;
+    }
+    info->tracer = head->tracer = nullptr;
+
+    Tracer *expected = nullptr;
+    if(!free_tracer_list.compare_exchange_strong(expected, l)) {
+      // failled to save the tracer to the free list head
+      delete l;
+    }
+
+    return ret;
   }
+  assert(!head->is_temp_disabled);
+  // if(head->trace_id) {
+  //   auto info = &branches[head->trace_id];
+  //   info->disabled = true;
+  // }
   return NULL;
 }
 
