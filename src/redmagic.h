@@ -22,8 +22,8 @@ void redmagic_fellthrough_branch(void *);
 // to be call at the start and end of interperter frames
 // will be used to identify recursive methods etc
 
-void redmagic_begin_branchable_frame(void);
-void redmagic_end_branchable_frame(void);
+void redmagic_begin_branchable_frame(unsigned long*);
+void redmagic_end_branchable_frame(unsigned long*);
 
 
 // control forcing an the JIT to start a trace of this thread

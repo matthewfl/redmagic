@@ -74,8 +74,8 @@ Tracer::Tracer(CodeBuffer* buffer) {
 
   interrupt_block_location = written.getRawBuffer();
 
-  method_address_stack.reserve(500);
-  merge_block_stack.reserve(500);
+  method_address_stack.reserve(100);
+  merge_block_stack.reserve(100);
   merge_block_stack.push_back(0);
 
   tracing_from = 0;
@@ -1591,6 +1591,7 @@ void Tracer::evaluate_instruction() {
       current_not_traced_call_addr = 0;
       current_not_traced_call_ret_loc = nullptr;
 
+      icount++; // this is for the extra "internal" instructions (and prevents jump from thinking that it directly followed a call)
     } else {
       // inline this method, so push the return address and continue
       // auto written = buffer->writeToEnd(cb_asm_push_stack);

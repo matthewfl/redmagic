@@ -206,8 +206,8 @@ namespace redmagic {
 
     int32_t *finish_patch_addr = nullptr;
 
-    std::vector<mem_loc_t> method_address_stack;
-    std::vector<mem_loc_t> merge_block_stack;
+    std::vector<mem_loc_t, RealMallocAllocator<mem_loc_t> > method_address_stack;
+    std::vector<mem_loc_t, RealMallocAllocator<mem_loc_t> > merge_block_stack;
 
     mem_loc_t merge_resume = 0;
 

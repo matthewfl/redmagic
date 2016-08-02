@@ -29,10 +29,16 @@
 #include <memory>
 #include <assert.h>
 
+#ifdef CONF_USER_TIMERS
+#include <time.h>
+#endif
+
 // for write syscall
 #include <unistd.h>
 
 #include <udis86.h>
+
+#include "cpp_allocator.h"
 
 namespace redmagic {
 
@@ -99,11 +105,34 @@ namespace redmagic {
       int sub_branches = 0;
       int finish_traces = 0; // number of branched traces that reached the end (not merged blocked back)
       uint64_t *trace_loop_counter = nullptr;
+
+#ifdef CONF_USE_TIMERS
+      timespec first_observed_time;
+#endif
+
+#ifdef CONF_ESTIMATE_INSTRUCTIONS
+      // this may be wrong since it can be impacted by time that the processor has switched
+      // or the task has been interruptted
+      // TODO: maybe in the future use the amount of thread cpu time to estimate this
+      uint64_t avg_observed_instructions = 0;
+#endif
     };
 
-    std::unordered_map<void*, branch_info> branches;
+    std::unordered_map<
+      void*,
+      branch_info,
+      // should be the same as normal
+      std::hash<void*>,
+      std::equal_to<void*>,
+      RealMallocAllocator<std::pair<const void*, branch_info>>
+      > branches;
   private:
-    std::unordered_set<void*> no_trace_methods;
+    std::unordered_set<
+      void*,
+      std::hash<void*>,
+      std::equal_to<void*>,
+      RealMallocAllocator<void*>
+      > no_trace_methods;
 
     std::atomic<uint32_t> thread_id_counter;
 
@@ -124,6 +153,15 @@ namespace redmagic {
     bool is_traced = false;
     bool is_compiled = false;
     int32_t frame_id = -1;
+
+
+#ifdef CONF_ESTIMATE_INSTRUCTIONS
+    int num_backwards_loops = 0;
+    uint64_t instruction_cnt_at_start = 0;
+    uint64_t sub_frame_num_instructions = 0;
+#endif
+
+    //void *d_ret = nullptr;
     //bool did_abort = false;
   };
 
@@ -261,13 +299,6 @@ namespace redmagic {
     size_t external_trampolines_size = 0;
 
     friend class SimpleCompiler;
-    // struct rebind_jumps {
-    //   mem_loc_t buffer_offset;
-    //   // suppose that this could disappear so might not be best idea to deallcate these and reallocate?
-    //   CodeBuffer *origional_buffer;
-    //   mem_loc_t origional_offset;
-    // };
-    // std::vector<rebind_jumps> jumps;
 
   };
 
@@ -286,14 +317,45 @@ namespace redmagic {
     ::write(2, buffer, b);
   }
 
-  /* assembly code to read the TSC */
+#ifdef CONF_ESTIMATE_INSTRUCTIONS
+  // assembly code to read the TSC
   static inline uint64_t RDTSC() {
     unsigned int hi, lo;
     __asm__ volatile("rdtsc" : "=a" (lo), "=d" (hi));
     return ((uint64_t)hi << 32) | lo;
   }
 
+  extern thread_local uint64_t last_thread_instructions;
+  extern thread_local uint64_t num_instructions_add;
 
+  static inline uint64_t instruction_cnt() {
+    // this value can go down when the processor resets or it changes between cores
+    uint64_t i = RDTSC();
+    if(i < last_thread_instructions)
+      num_instructions_add += last_thread_instructions - i;
+    last_thread_instructions = i;
+    return i + num_instructions_add;
+  }
+#endif
+
+#ifdef CONF_USE_TIMERS
+  static inline timespec time_delta(timespec start, timespec end) {
+    timespec temp;
+    if ((end.tv_nsec-start.tv_nsec)<0) {
+      temp.tv_sec = end.tv_sec-start.tv_sec-1;
+      temp.tv_nsec = 1000000000+end.tv_nsec-start.tv_nsec;
+    } else {
+      temp.tv_sec = end.tv_sec-start.tv_sec;
+      temp.tv_nsec = end.tv_nsec-start.tv_nsec;
+    }
+    return temp;
+  }
+
+  static inline uint64_t time_ms(timespec t) {
+    return t.tv_sec * 1000 + t.tv_nsec / 1000000;
+  }
+
+#endif
 }
 
 

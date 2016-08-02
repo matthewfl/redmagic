@@ -1,9 +1,19 @@
 #ifndef REDMAGIC_CONFIG_H_
 #define REDMAGIC_CONFIG_H_
 
+// configure the system to perform more traces to attempt to debug
+#define CONF_DEBUG_BUILD
+
+#ifndef CONF_DEBUG_BUILD
+# define CONF_RELEASE_BUILD
+# define CONF_BUILD_TOGGLE(debug, release) release
+#else
+# define CONF_BUILD_TOGGLE(debug, release) debug
+#endif
+
 
 // the number of loops that are require to occure before it traces a loop
-#define CONF_NUMBER_OF_JUMPS_BEFORE_TRACE 10
+#define CONF_NUMBER_OF_JUMPS_BEFORE_TRACE CONF_BUILD_TOGGLE(10, 150)
 
 // redmagic will attempt inline forward jumps which is useful in cases like: `if(a || b || c...)` where many conditional jumps
 // will merge to the same point, but it may require back tracking in a lot of cases which may be slower
@@ -15,14 +25,26 @@
 #define CONF_ATTEMPT_BACKWARDS_JUMP_INLINE
 
 // makes it print all the instructions processed and extra info
-#define CONF_VERBOSE
+#ifdef CONF_DEBUG_BUILD
+# define CONF_VERBOSE
+#endif
 
 // support aborting the system after some fixed number of instruction have been processed, see tools/bisect for debugging with this
-#define CONF_GLOBAL_ABORT
+#ifdef CONF_DEBUG_BUILD
+# define CONF_GLOBAL_ABORT
+#endif
+
 
 // somehow python is not hitting the fellthrough trace for some traces that it starts
 // unable to determine where it should actually be performing this, so we are just makeing the end of the branchable frame
 // close out any traces that were created in this frame
 #define CONF_ALLOW_UNCLOSED_TRACES
+
+
+// using timers in addition to number of times it loops to determine what to trace
+#define CONF_USE_TIMERS
+#define CONF_TIMER_DELAY_MS CONF_BUILD_TOGGLE(0, 5000)
+
+#define CONF_ESTIMATE_INSTRUCTIONS
 
 #endif // REDMAGIC_CONFIG_H_

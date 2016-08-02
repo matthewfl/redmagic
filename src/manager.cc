@@ -27,11 +27,17 @@ namespace redmagic {
 
   thread_local tracer_stack_state *stack_head = nullptr;
 
+  // this isn't using the real malloc so it might have been allocated with the thread local buffer..
   thread_local vector<tracer_stack_state> threadl_tracer_stack;
 
   thread_local uint32_t this_thread_id = 0;
 
   thread_local int32_t branchable_frame_id = -1;
+
+#ifdef CONF_ESTIMATE_INSTRUCTIONS
+  thread_local uint64_t last_thread_instructions = 0;
+  thread_local uint64_t num_instructions_add = 0;
+#endif
 
 #ifdef CONF_GLOBAL_ABORT
   extern long global_icount_abort;
@@ -111,14 +117,21 @@ extern "C" void* red_user_end_merge_block(void *_, void *ret_addr) {
   return manager->end_merge_block();
 }
 
-extern "C" void* red_user_begin_branchable_frame(void *_, void *ret_addr) {
+extern "C" void* red_user_begin_branchable_frame(uint64_t *frame_id, void *ret_addr) {
   UnprotectMalloc upm;
   branchable_frame_id++;
+  if(frame_id != NULL) {
+    *frame_id = 0xdead0000 | branchable_frame_id;
+  }
   return NULL;
 }
 
-extern "C" void* red_user_end_branchable_frame(void *_, void *ret_addr, void **stack_ptr) {
+extern "C" void* red_user_end_branchable_frame(uint64_t *frame_id, void *ret_addr, void **stack_ptr) {
   UnprotectMalloc upm;
+  // TODO: less of a hack, issue when call multiple times in a row
+  if(frame_id != NULL && (void**)frame_id - stack_ptr > 0) {
+    assert(*frame_id == 0xdead0000 | branchable_frame_id);
+  }
   return manager->end_branchable_frame(ret_addr, stack_ptr);
 }
 
@@ -368,6 +381,12 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
       return ret;
     } else {
       new_head = head;
+#ifdef CONF_ESTIMATE_INSTRUCTIONS
+      head->num_backwards_loops++;
+      if(head->num_backwards_loops >= (info->count / 8)) {
+        info->avg_observed_instructions = (head->instruction_cnt_at_start - head->sub_frame_num_instructions) / head->num_backwards_loops;
+      }
+#endif
       if(info->starting_point && (!info->tracer || info->tracer->did_abort)) {
         // then we must have performed the abort
         //assert(info->tracer->did_abort);
@@ -391,6 +410,7 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
     head = &threadl_tracer_stack[threadl_tracer_stack.size() - 2];
     new_head->trace_id = id;
     if(info->starting_point) {
+      info->count++;
       if(info->tracer && !info->tracer->did_abort) {
         // then this must be some recursive frame or another thread is tracing this
 #ifndef NDEBUG
@@ -438,7 +458,19 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
     }
     return start_addr;
   }
-  if(cnt > CONF_NUMBER_OF_JUMPS_BEFORE_TRACE && !info->disabled) {
+  bool should_perform_trace = cnt > CONF_NUMBER_OF_JUMPS_BEFORE_TRACE && !info->disabled;
+#ifdef CONF_USE_TIMERS
+  timespec now;
+  if(clock_gettime(CLOCK_MONOTONIC, &now) == 0) {
+    if(info->first_observed_time.tv_sec == 0) {
+      info->first_observed_time = now;
+    }
+    if(time_ms(time_delta(info->first_observed_time, now)) < CONF_TIMER_DELAY_MS) {
+      should_perform_trace = false;
+    }
+  }
+#endif
+  if(should_perform_trace) {
     goto start_new_trace;
   }
 
@@ -533,6 +565,7 @@ void* Manager::temp_disable(void *ret_addr) {
   auto head = get_tracer_head();
   assert(!head->is_temp_disabled);
   head->is_temp_disabled = true;
+  //head->d_ret = ret_addr;
   void *ret = NULL;
   assert(!head->is_traced || head->tracer);
   if(head->tracer && !head->tracer->did_abort) {
@@ -546,12 +579,16 @@ void* Manager::temp_disable(void *ret_addr) {
 }
 
 void* Manager::temp_enable(void *ret_addr) {
+  // have this here so that we can have pop double check that a frame is not disabled when poped
+  assert(threadl_tracer_stack[threadl_tracer_stack.size() - 2].is_temp_disabled);
+  threadl_tracer_stack[threadl_tracer_stack.size() - 2].is_temp_disabled = false;
+
   auto old_head = pop_tracer_stack();
-  assert(!old_head.is_temp_disabled);
   auto head = get_tracer_head();
-  assert(head->is_temp_disabled);
-  head->is_temp_disabled = false;
+  //assert(head->is_temp_disabled);
+  //head->is_temp_disabled = false;
   void *ret = NULL;
+  //head->d_ret = nullptr;
   if(head->tracer && !head->tracer->did_abort) {
     head->tracer->TempEnableTrace(ret_addr);
   }
@@ -660,6 +697,7 @@ void* Manager::end_branchable_frame(void *ret_addr, void **stack_ptr) {
   assert(ret_addr == *stack_ptr);
   while(head->frame_id >= branchable_frame_id) {
     assert(!head->is_compiled);
+    assert(!head->is_temp_disabled);
     if(head->is_traced) {
       auto info = &branches[head->trace_id];
       assert(info->tracer == head->tracer);
@@ -679,6 +717,7 @@ void* Manager::end_branchable_frame(void *ret_addr, void **stack_ptr) {
     } else {
       pop_tracer_stack();
       head = get_tracer_head();
+
       if(head->resume_addr) {
         if(head->tracer) {
           head->tracer->JumpFromNestedLoop((uint8_t*)ret_addr - 5); // backup the pc to the call instruction
@@ -705,6 +744,9 @@ uint32_t Manager::tracer_stack_size() {
 tracer_stack_state* Manager::push_tracer_stack() {
   tracer_stack_state e;
   e.frame_id = branchable_frame_id;
+#ifdef CONF_ESTIMATE_INSTRUCTIONS
+  e.instruction_cnt_at_start = instruction_cnt();
+#endif
   threadl_tracer_stack.push_back(e);
   return stack_head = &threadl_tracer_stack.back();
 }
@@ -715,6 +757,10 @@ tracer_stack_state Manager::pop_tracer_stack() {
   threadl_tracer_stack.pop_back();
   assert(!threadl_tracer_stack.empty());
   stack_head = &threadl_tracer_stack.back();
+  assert(!stack_head->is_temp_disabled);
+#ifdef CONF_ESTIMATE_INSTRUCTIONS
+  stack_head->sub_frame_num_instructions += r.sub_frame_num_instructions + instruction_cnt() - r.instruction_cnt_at_start;
+#endif
 
   // for(;;) {
   //   if(stack_head->trace_id) {
@@ -733,8 +779,9 @@ tracer_stack_state *Manager::get_tracer_head() {
   if(stack_head == nullptr) {
     assert(threadl_tracer_stack.capacity() == 0);
     threadl_tracer_stack.reserve(50);
-    tracer_stack_state e;
-    threadl_tracer_stack.push_back(e);
+    // tracer_stack_state e;
+    // threadl_tracer_stack.push_back(e);
+    push_tracer_stack();
     stack_head = &threadl_tracer_stack[0];
   }
   return stack_head;
@@ -815,24 +862,54 @@ void Manager::print_info() {
   int cnt = 0;
   for(auto b : bi) {
     if(cnt % 30 == 0) {
-      red_printf("%3s|%16s|%16s|%10s|%10s|%10s|%12s|%10s\n", "#", "trace id", "trace location", "loop count", "sum icount", "max icount", "sub branches", "finished traces");
+      red_printf("%3s|%16s|%16s|%10s|%10s|%10s|%10s|%12s|%10s"
+#ifdef CONF_ESTIMATE_INSTRUCTIONS
+                 "|%12s"
+#endif
+                 "\n", "#", "trace id", "trace location", "loop count", "enter cnt", "sum icount", "max icount", "sub branches", "fin traces"
+#ifdef CONF_ESTIMATE_INSTRUCTIONS
+                 ,"esti instr"
+#endif
+                 );
       red_printf("=======================================================================================================\n");
     }
     cnt++;
     if(cnt > 200) break;
-    red_printf("%3i|%#016lx|%#016lx|%10lu|%10lu|%10lu|%12i|%10i\n",
+    red_printf("%3i|%#016lx|%#016lx|%10lu|%10lu|%10lu|%10lu|%12i|%10i"
+#ifdef CONF_ESTIMATE_INSTRUCTIONS
+               "|%12i"
+#endif
+               "\n",
                cnt,
                b.first,
                b.second->starting_point,
                (b.second->trace_loop_counter ? *b.second->trace_loop_counter : 0),
+               b.second->count,
                b.second->traced_instruction_count,
                b.second->longest_trace_instruction_count,
                b.second->sub_branches,
-               b.second->finish_traces);
+               b.second->finish_traces
+#ifdef CONF_ESTIMATE_INSTRUCTIONS
+               ,b.second->avg_observed_instructions
+#endif
+               );
   }
 
   red_printf("thread tracers\n");
-  red_printf("%3s|E|C|%16s|%16s|%16s|%16s|%16s\n", "#", "trace id", "tracing from", "tracing pc", "generated pc", "trace icount");
+  red_printf("%3s|E|C|%16s|%16s|%16s|%16s|%16s"
+#ifdef CONF_ESTIMATE_INSTRUCTIONS
+             "|%16s"
+#endif
+             "\n"
+             , "#", "trace id", "tracing from", "tracing pc", "generated pc", "trace icount"
+#ifdef CONF_ESTIMATE_INSTRUCTIONS
+             ,"esti instr"
+#endif
+             );
+#ifdef CONF_ESTIMATE_INSTRUCTIONS
+  uint64_t current_instructions = instruction_cnt();
+  uint64_t sub_frame_instructions = 0;
+#endif
   red_printf("=======================================================================================================\n");
   for(int i = threadl_tracer_stack.size() - 1; i >= 0; i--) {
     auto info = &threadl_tracer_stack[i];
@@ -844,6 +921,14 @@ void Manager::print_info() {
                info->tracer ? (mem_loc_t)info->tracer->tracing_from : 0,
                info->tracer ? info->tracer->get_pc() : 0,
                info->tracer ? info->tracer->generated_pc() : 0,
-               info->tracer ? info->tracer->get_icount() : 0);
+               info->tracer ? info->tracer->get_icount() : 0
+#ifdef CONF_ESTIMATE_INSTRUCTIONS
+               ,(current_instructions - info->instruction_cnt_at_start - info->sub_frame_num_instructions - sub_frame_instructions)
+#endif
+               );
+#ifdef CONF_ESTIMATE_INSTRUCTIONS
+    sub_frame_instructions += current_instructions - info->instruction_cnt_at_start - info->sub_frame_num_instructions - sub_frame_instructions;
+#endif
+
   }
 }

@@ -44,6 +44,7 @@ CodeBuffer SimpleCompiler::finalize_bottom() {
   assert(minSize == getOffset());
   assert(gen_c_size == size); // return the full size
 
+  void *gen_loc2 = buffer->buffer + buffer->size - buffer->trampolines_size - size;
   buffer->trampolines_size += minSize;
   assert(gen_loc == (void*)(buffer->buffer + buffer->size - buffer->trampolines_size));
 
