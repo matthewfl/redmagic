@@ -52,7 +52,7 @@ def release():
     RELEASE = True
     C_FLAGS = C_FLAGS.replace('-O0', '-O2')
     C_FLAGS = C_FLAGS.replace('-ggdb', '')
-    C_FLAGS += ' -DNDEBUG -fdata-sections -ffunction-sections -flto '
+    C_FLAGS += ' -DNDEBUG -DRED_RELEASE -fdata-sections -ffunction-sections -flto '
     LD_FLAGS += '-flto ' #-Wl,--gc-sections -Wl,--print-gc-sections '
     clean()
     build()

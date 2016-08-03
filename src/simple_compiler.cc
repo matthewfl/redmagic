@@ -39,20 +39,25 @@ CodeBuffer SimpleCompiler::finalize_bottom() {
   size_t minSize = getOffset();
   //setOffset(buffer->size - buffer->trampolines_size - size);
   //void *start = make();
+  size_t old_trampolines_size = buffer->trampolines_size;
   void *gen_loc = buffer->buffer + buffer->size - buffer->trampolines_size - size;
+  uint8_t *gen_tramp = buffer->buffer + buffer->size - buffer->trampolines_size;
   size_t gen_c_size = relocCode(gen_loc);
   assert(minSize == getOffset());
-  assert(gen_c_size == size); // return the full size
+  assert(gen_c_size == size); // relocCode always returns the size regardless of how much it actually ends up using
 
-  void *gen_loc2 = buffer->buffer + buffer->size - buffer->trampolines_size - size;
-  buffer->trampolines_size += minSize;
-  assert(gen_loc == (void*)(buffer->buffer + buffer->size - buffer->trampolines_size));
+  assert(trampolines_used <= size - minSize);
+
+  buffer->trampolines_size = old_trampolines_size + size;
+  // void *gen_loc2 = buffer->buffer + buffer->size - buffer->trampolines_size - size;
+  // buffer->trampolines_size += minSize;
+  // assert(gen_loc == (void*)(buffer->buffer + buffer->size - buffer->trampolines_size));
 
   CodeBuffer ret((mem_loc_t)gen_loc, minSize);
   ret.can_write_buffer = true;
   if(trampolines_used) {
     ret.external_trampolines_size += trampolines_used;
-    ret.external_trampolines = buffer->buffer + buffer->size - buffer->trampolines_size + minSize;
+    ret.external_trampolines = gen_tramp - trampolines_used;
   }
   buffer = NULL;
   return ret;

@@ -97,6 +97,7 @@ namespace redmagic {
   public:
     struct branch_info {
       int count = 0;
+      int count_fellthrough = 0;
       Tracer *tracer = nullptr;
       void *starting_point = nullptr;
       bool disabled = false;
@@ -107,7 +108,7 @@ namespace redmagic {
       uint64_t *trace_loop_counter = nullptr;
 
 #ifdef CONF_USE_TIMERS
-      timespec first_observed_time;
+      timespec first_observed_time = {0,0};
 #endif
 
 #ifdef CONF_ESTIMATE_INSTRUCTIONS
@@ -322,7 +323,7 @@ namespace redmagic {
   static inline uint64_t RDTSC() {
     unsigned int hi, lo;
     __asm__ volatile("rdtsc" : "=a" (lo), "=d" (hi));
-    return ((uint64_t)hi << 32) | lo;
+    return (((uint64_t)hi) << 32) | lo;
   }
 
   extern thread_local uint64_t last_thread_instructions;

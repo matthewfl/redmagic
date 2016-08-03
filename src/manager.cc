@@ -189,6 +189,147 @@ static const char *avoid_inlining_methods[] = {
   "dladdr1",
   "dlinfo",
 
+  // should be no point to inline pthread
+  // and likely has some wonky controlflow internally
+  "pthread_create",
+  "pthread_exit",
+  "pthread_join",
+  "pthread_tryjoin_np",
+  "pthread_timedjoin_np",
+  "pthread_detach",
+  "pthread_attr_init",
+  "pthread_attr_destroy",
+  "pthread_attr_getdetachstate",
+  "pthread_attr_setdetachstate",
+  "pthread_attr_getguardsize",
+  "pthread_attr_setguardsize",
+  "pthread_attr_getschedparam",
+  "pthread_attr_setschedparam",
+  "pthread_attr_getschedpolicy",
+  "pthread_attr_setschedpolicy",
+  "pthread_attr_getinheritsched",
+  "pthread_attr_setinheritsched",
+  "pthread_attr_getscope",
+  "pthread_attr_setscope",
+  "pthread_attr_getstackaddr",
+  "pthread_attr_setstackaddr",
+  "pthread_attr_getstacksize",
+  "pthread_attr_setstacksize",
+  "pthread_attr_getstack",
+  "pthread_attr_setaffinity_np",
+  "pthread_attr_getaffinity_np",
+  "pthread_getattr_default_np",
+  "pthread_setattr_default_np",
+  "pthread_getattr_np",
+  "pthread_setschedparam",
+  "pthread_getschedparam",
+  "pthread_setschedprio",
+  "pthread_getname_np",
+  "pthread_setname_np",
+  "pthread_getconcurrency",
+  "pthread_setconcurrency",
+  "pthread_yield",
+  "pthread_setaffinity_np",
+  "pthread_getaffinity_np",
+  "pthread_once",
+  "pthread_setcancelstate",
+  "pthread_setcanceltype",
+  "pthread_cancel",
+  "pthread_testcancel",
+  "pthread_cleanup_pop",
+  "pthread_cleanup_push",
+  "pthread_cleanup_pop",
+  "pthread_cleanup_push_defer_np",
+  "pthread_cleanup_pop_restore_np",
+  "__pthread_cleanup_frame",
+  "pthread_cleanup_pop",
+  "pthread_cleanup_push",
+  "__pthread_cleanup_routine",
+  "pthread_cleanup_pop",
+  "pthread_cleanup_push_defer_np",
+  "__pthread_cleanup_routine",
+  "pthread_cleanup_pop_restore_np",
+  "pthread_cleanup_pop",
+  "pthread_cleanup_push",
+  "__pthread_register_cancel",
+  "pthread_cleanup_pop",
+  "__pthread_unregister_cancel",
+  "pthread_cleanup_push_defer_np",
+  "__pthread_register_cancel_defer",
+  "pthread_cleanup_pop_restore_np",
+  "__pthread_unregister_cancel_restore",
+  "__pthread_unwind_next",
+  "pthread_mutex_init",
+  "pthread_mutex_destroy",
+  "pthread_mutex_trylock",
+  "pthread_mutex_lock",
+  "pthread_mutex_timedlock",
+  "pthread_mutex_unlock",
+  "pthread_mutex_getprioceiling",
+  "pthread_mutex_setprioceiling",
+  "pthread_mutex_consistent",
+  "pthread_mutex_consistent_np",
+  "pthread_mutexattr_init",
+  "pthread_mutexattr_destroy",
+  "pthread_mutexattr_getpshared",
+  "pthread_mutexattr_setpshared",
+  "pthread_mutexattr_gettype",
+  "pthread_mutexattr_settype",
+  "pthread_mutexattr_getprotocol",
+  "pthread_mutexattr_setprotocol",
+  "pthread_mutexattr_getprioceiling",
+  "pthread_mutexattr_setprioceiling",
+  "pthread_mutexattr_getrobust",
+  "pthread_mutexattr_getrobust_np",
+  "pthread_mutexattr_setrobust",
+  "pthread_mutexattr_setrobust_np",
+  "pthread_rwlock_init",
+  "pthread_rwlock_destroy",
+  "pthread_rwlock_rdlock",
+  "pthread_rwlock_tryrdlock",
+  "pthread_rwlock_timedrdlock",
+  "pthread_rwlock_wrlock",
+  "pthread_rwlock_trywrlock",
+  "pthread_rwlock_timedwrlock",
+  "pthread_rwlock_unlock",
+  "pthread_rwlockattr_init",
+  "pthread_rwlockattr_destroy",
+  "pthread_rwlockattr_getpshared",
+  "pthread_rwlockattr_setpshared",
+  "pthread_rwlockattr_getkind_np",
+  "pthread_rwlockattr_setkind_np",
+  "pthread_cond_init",
+  "pthread_cond_destroy",
+  "pthread_cond_signal",
+  "pthread_cond_broadcast",
+  "pthread_cond_wait",
+  "pthread_cond_timedwait",
+  "pthread_condattr_init",
+  "pthread_condattr_destroy",
+  "pthread_condattr_getpshared",
+  "pthread_condattr_setpshared",
+  "pthread_condattr_getclock",
+  "pthread_condattr_setclock",
+  "pthread_spin_init",
+  "pthread_spin_destroy",
+  "pthread_spin_lock",
+  "pthread_spin_trylock",
+  "pthread_spin_unlock",
+  "pthread_barrier_init",
+  "pthread_barrier_destroy",
+  "pthread_barrier_wait",
+  "pthread_barrierattr_init",
+  "pthread_barrierattr_destroy",
+  "pthread_barrierattr_getpshared",
+  "pthread_barrierattr_setpshared",
+  "pthread_key_create",
+  "pthread_key_delete",
+  "pthread_getspecific",
+  "pthread_setspecific",
+  "pthread_getcpuclockid",
+  "pthread_atfork",
+
+
 
   // we don't want to inline ourselves
   // so record the entry functions
@@ -227,8 +368,9 @@ Manager::Manager() {
   void *dlh = dlopen(NULL, RTLD_NOW);
   for(int i = 0; avoid_inlining_methods[i] != NULL; i++) {
     void *addr = dlsym(dlh, avoid_inlining_methods[i]);
-    assert(addr);
-    no_trace_methods.insert(addr);
+    //assert(addr);
+    if(addr)
+      no_trace_methods.insert(addr);
   }
   dlclose(dlh);
 
@@ -383,8 +525,9 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
       new_head = head;
 #ifdef CONF_ESTIMATE_INSTRUCTIONS
       head->num_backwards_loops++;
-      if(head->num_backwards_loops >= (info->count / 8)) {
-        info->avg_observed_instructions = (head->instruction_cnt_at_start - head->sub_frame_num_instructions) / head->num_backwards_loops;
+      if(head->num_backwards_loops > (info->count / 8)) {
+        uint64_t icnt = instruction_cnt();
+        info->avg_observed_instructions = (icnt - head->instruction_cnt_at_start - head->sub_frame_num_instructions) / head->num_backwards_loops;
       }
 #endif
       if(info->starting_point && (!info->tracer || info->tracer->did_abort)) {
@@ -458,7 +601,10 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
     }
     return start_addr;
   }
-  bool should_perform_trace = cnt > CONF_NUMBER_OF_JUMPS_BEFORE_TRACE && !info->disabled;
+  bool should_perform_trace = cnt > CONF_NUMBER_OF_JUMPS_BEFORE_TRACE &&
+    !info->disabled &&
+    // to check that it loops a few times once it enters, or that the previous frame is traced
+    (cnt > info->count_fellthrough * 3 || head->is_traced);
 #ifdef CONF_USE_TIMERS
   timespec now;
   if(clock_gettime(CLOCK_MONOTONIC, &now) == 0) {
@@ -470,6 +616,13 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
     }
   }
 #endif
+// #ifdef CONF_ESTIMATE_INSTRUCTIONS
+//   if(info->avg_observed_instructions == 0) {
+//     // if we don't know this number then likely there were a number of fallthroughs
+//     // which indicates that the branch doesn't backwards jump a lot
+//     should_perform_trace = false;
+//   }
+// #endif
   if(should_perform_trace) {
     goto start_new_trace;
   }
@@ -505,6 +658,7 @@ void* Manager::fellthrough_branch(void *id, void *ret_addr) {
   auto head = get_tracer_head();
   if(head->trace_id == id && head->frame_id == branchable_frame_id) {
     auto info = &branches[id];
+    info->count_fellthrough++;
     if(head->is_traced) {
       assert(!head->is_compiled);
       assert(!info->disabled);
@@ -759,7 +913,9 @@ tracer_stack_state Manager::pop_tracer_stack() {
   stack_head = &threadl_tracer_stack.back();
   assert(!stack_head->is_temp_disabled);
 #ifdef CONF_ESTIMATE_INSTRUCTIONS
-  stack_head->sub_frame_num_instructions += r.sub_frame_num_instructions + instruction_cnt() - r.instruction_cnt_at_start;
+  uint64_t icnt = instruction_cnt();
+  uint64_t sub_f = icnt  - r.instruction_cnt_at_start;
+  stack_head->sub_frame_num_instructions += sub_f;
 #endif
 
   // for(;;) {
@@ -832,16 +988,10 @@ void Manager::print_info() {
   UnprotectMalloc upm;
   vector<pair<void*, branch_info*>> bi;
   bi.reserve(branches.size());
-  // for(auto b : branches) {
-  //   bi.push_back(&b);
-  // }
   for(auto it = branches.begin(); it != branches.end(); it++) {
     bi.push_back(make_pair(it->first, &it->second));
   }
   std::sort(bi.begin(), bi.begin() + bi.size(), [](auto a, auto b) -> bool {
-      //return a < b;
-
-
       if(a.second->trace_loop_counter != nullptr && b.second->trace_loop_counter != nullptr) {
         if(a.second->longest_trace_instruction_count * (*a.second->trace_loop_counter) > b.second->longest_trace_instruction_count * (*b.second->trace_loop_counter))
           return true;
@@ -854,7 +1004,6 @@ void Manager::print_info() {
         return true;
 
       return a.second->count > b.second->count;
-
     });
 
   red_printf("Global icount: %ld\n", global_icount);
@@ -862,22 +1011,22 @@ void Manager::print_info() {
   int cnt = 0;
   for(auto b : bi) {
     if(cnt % 30 == 0) {
-      red_printf("%3s|%16s|%16s|%10s|%10s|%10s|%10s|%12s|%10s"
+      red_printf("%3s|%16s|%16s|%10s|%10s|%10s|%10s|%10s|%12s|%10s"
 #ifdef CONF_ESTIMATE_INSTRUCTIONS
-                 "|%12s"
+                 "|%14s"
 #endif
-                 "\n", "#", "trace id", "trace location", "loop count", "enter cnt", "sum icount", "max icount", "sub branches", "fin traces"
+                 "\n", "#", "trace id", "trace location", "loop count", "enter cnt", "exit cnt", "sum icount", "max icount", "sub branches", "fin traces"
 #ifdef CONF_ESTIMATE_INSTRUCTIONS
                  ,"esti instr"
 #endif
                  );
-      red_printf("=======================================================================================================\n");
+      red_printf("===============================================================================================================================\n");
     }
     cnt++;
     if(cnt > 200) break;
-    red_printf("%3i|%#016lx|%#016lx|%10lu|%10lu|%10lu|%10lu|%12i|%10i"
+    red_printf("%3i|%#016lx|%#016lx|%10lu|%10lu|%10lu|%10lu|%10lu|%12i|%10i"
 #ifdef CONF_ESTIMATE_INSTRUCTIONS
-               "|%12i"
+               "|%14lu"
 #endif
                "\n",
                cnt,
@@ -885,6 +1034,7 @@ void Manager::print_info() {
                b.second->starting_point,
                (b.second->trace_loop_counter ? *b.second->trace_loop_counter : 0),
                b.second->count,
+               b.second->count_fellthrough,
                b.second->traced_instruction_count,
                b.second->longest_trace_instruction_count,
                b.second->sub_branches,
@@ -896,9 +1046,9 @@ void Manager::print_info() {
   }
 
   red_printf("thread tracers\n");
-  red_printf("%3s|E|C|%16s|%16s|%16s|%16s|%16s"
+  red_printf("%3s|E|C|%16s|%16s|%16s|%16s|%12s"
 #ifdef CONF_ESTIMATE_INSTRUCTIONS
-             "|%16s"
+             "|%14s"
 #endif
              "\n"
              , "#", "trace id", "tracing from", "tracing pc", "generated pc", "trace icount"
@@ -913,7 +1063,11 @@ void Manager::print_info() {
   red_printf("=======================================================================================================\n");
   for(int i = threadl_tracer_stack.size() - 1; i >= 0; i--) {
     auto info = &threadl_tracer_stack[i];
-    red_printf("%3i|%1i|%1i|%#016lx|%#016lx|%#016lx|%#016lx|%10lu\n",
+    red_printf("%3i|%1i|%1i|%#016lx|%#016lx|%#016lx|%#016lx|%12lu"
+#ifdef CONF_ESTIMATE_INSTRUCTIONS
+               "|%14lu"
+#endif
+               "\n",
                i,
                (info->tracer && !info->is_temp_disabled),
                info->is_compiled,
@@ -927,7 +1081,7 @@ void Manager::print_info() {
 #endif
                );
 #ifdef CONF_ESTIMATE_INSTRUCTIONS
-    sub_frame_instructions += current_instructions - info->instruction_cnt_at_start - info->sub_frame_num_instructions - sub_frame_instructions;
+    sub_frame_instructions = current_instructions - info->instruction_cnt_at_start;
 #endif
 
   }

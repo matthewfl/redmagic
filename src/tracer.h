@@ -111,6 +111,8 @@ namespace redmagic {
     // when done patch the address that needs to link to this trace
     void finish_patch();
 
+    mem_loc_t merge_close_core();
+
     inline register_t pop_stack() {
       register_t r = *((register_t*)((mem_loc_t)regs_struct->rsp + move_stack_by));
       move_stack_by += sizeof(register_t);

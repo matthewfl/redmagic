@@ -93,6 +93,7 @@ void red_begin_tracing(struct user_regs_struct *other_stack, void* __, Tracer* t
 
   // can not return from this method
   assert(0);
+  __builtin_unreachable();
 }
 
 extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_address, struct user_regs_struct *regs_struct, mem_loc_t merge_addr) {
@@ -533,15 +534,21 @@ void* Tracer::EndTraceFallthrough(bool check_id) {
   if(check_id) {
     wb.replace_stump<uint64_t>(0xfafafafafafafafa, w.getRawBuffer());
   }
+#ifdef CONF_MERGE_BACK_ON_RET
+  assert(merge_block_stack.size() == method_address_stack.size() + 1);
+#else
   assert(merge_block_stack.size() == 1);
-  mem_loc_t write_addr = merge_block_stack[0];
-  merge_block_stack[0] = 0;
+#endif
   merge_resume = 0;
-  while(write_addr != 0) {
-    mem_loc_t next_addr = *(mem_loc_t*)write_addr;
-    *(mem_loc_t*)write_addr = 0;
-    write_addr = next_addr;
+  for(mem_loc_t write_addr : merge_block_stack) {
+    while(write_addr != 0) {
+      mem_loc_t next_addr = *(mem_loc_t*)write_addr;
+      *(mem_loc_t*)write_addr = 0;
+      write_addr = next_addr;
+    }
   }
+  merge_block_stack.clear();
+  merge_block_stack.push_back(0);
   method_address_stack.clear();
   finish_patch();
   tracing_from = 0;
@@ -760,6 +767,18 @@ void* Tracer::EndMergeBlock() {
     return NULL; // see above
   assert(icount - last_call_instruction < 2);
   buffer->setOffset(last_call_generated_op);
+  mem_loc_t res_addr = buffer->getRawBuffer() + buffer->getOffset();
+  write_interrupt_block();
+  mem_loc_t ret = merge_close_core();
+  if(ret == 0)
+    ret = res_addr;
+
+  return (void*)ret;
+
+  assert(0);
+}
+
+mem_loc_t Tracer::merge_close_core() {
   if(merge_block_stack.size() == 1) {
     assert(merge_resume != 0);
     mem_loc_t resume_a = merge_resume;
@@ -814,20 +833,18 @@ void* Tracer::EndMergeBlock() {
     red_printf("merge block closing back to parent: %#016lx\n", head->trace_id);
 #endif
 
-    return (void*)resume_a;
+    return resume_a;
   } else {
     mem_loc_t merge_addr = buffer->getRawBuffer() + buffer->getOffset();
     mem_loc_t write_addr = merge_block_stack.back();
-    write_interrupt_block();
     merge_block_stack.pop_back();
     while(write_addr != 0) {
       mem_loc_t next_addr = *(mem_loc_t*)write_addr;
       *(mem_loc_t*)write_addr = merge_addr;
       write_addr = next_addr;
     }
-    return (void*)merge_addr;
+    return 0;
   }
-
   assert(0);
 }
 
@@ -1439,6 +1456,10 @@ void Tracer::evaluate_instruction() {
         buffer->setOffset(last_call_generated_op);
         pop_stack();
         method_address_stack.pop_back(); // have to pop since we aren't inlining this
+#ifdef CONF_MERGE_BACK_ON_RET
+        mem_loc_t merge_res = merge_close_core();
+        assert(merge_res == 0);
+#endif
         set_pc(last_call_ret_addr);
         SimpleCompiler compiler(buffer);
         compiler.call(asmjit::imm_ptr(jump_dest));
@@ -1604,6 +1625,9 @@ void Tracer::evaluate_instruction() {
       push_stack(ret_addr);
       set_pc(call_pc);
       method_address_stack.push_back(call_pc);
+#ifdef CONF_MERGE_BACK_ON_RET
+      merge_block_stack.push_back(0);
+#endif
     }
 
     return;
@@ -1617,14 +1641,21 @@ void Tracer::evaluate_instruction() {
   }
   case UD_Iret:
   case UD_Iretf: {
+#ifndef NDEBUG
     const ud_operand_t *opr = ud_insn_opr(&disassm, 0);
+    assert(opr == NULL);
+#endif
     // These prefixes are used for alignment purposes and have no impact on the execution of the instruction
     // assert(disassm.pfx_rep == UD_NONE);
     // assert(disassm.pfx_repe == UD_NONE);
     // assert(disassm.pfx_repne == UD_NONE);
-    assert(opr == NULL);
     buffer->writeToEnd(cb_asm_pop_stack);
     set_pc(pop_stack());
+#ifdef CONF_MERGE_BACK_ON_RET
+    mem_loc_t merge_close = merge_close_core();
+    if(merge_close) // this might have an issue with the tracer getting free and then using it when it trys to continue the program
+      continue_program(merge_close);
+#endif
     if(!method_address_stack.empty())
       method_address_stack.pop_back();
     return;
