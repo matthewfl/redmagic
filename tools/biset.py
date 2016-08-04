@@ -7,17 +7,18 @@ import time
 from collections import deque
 
 
+
 def do_run(instruction_count, process, error_search):
     env = os.environ.copy()
     env['REDMAGIC_GLOBAL_ABORT'] = str(instruction_count)
 
     cnt = 0
-    qu = deque([], maxlen=300)
+    qu = deque([], maxlen=600)
 
-    proc = subprocess.Popen(process, stderr=subprocess.PIPE, env=env)
+    proc = subprocess.Popen(process, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
 
     try:
-        for li in proc.stderr:
+        for li in proc.stdout:
             qu.append(li)
             if cnt % 50000 == 0:
                 print(instruction_count, li)
@@ -42,7 +43,7 @@ def main():
 
     assert max_i > min_i
 
-    error_search = ['IndexError', 'Assertion']
+    error_search = ['IndexError', 'Assertion', 'SIGSEGV', 'Traceback']
     #process = '/home/matthew/developer/cpython/python -m IPython -c exit()'.split()
     # run under gdb since the program seems to change behavor depending on how it is run
     process = ['gdb', '/home/matthew/developer/cpython/python', '--eval-command=run -m IPython -c "exit()"', '--eval-command=quit']

@@ -137,6 +137,8 @@ extern "C" void* red_user_end_branchable_frame(uint64_t *frame_id, void *ret_add
 
 extern "C" void *__real_malloc(size_t);
 
+#pragma GCC visibility push(default)
+
 extern "C" void redmagic_start() {
   UnprotectMalloc upm;
   red_printf("Using redmagic jit by Matthew Francis-Landau <matthew@matthewfl.com>\n");
@@ -167,6 +169,8 @@ extern "C" void redmagic_disable_branch(void *id) {
   UnprotectMalloc upm;
   manager->disable_branch(id);
 }
+
+#pragma GCC visibility pop
 
 static const char *avoid_inlining_methods[] = {
   // inlining the allocator doesn't really help since it will have a lot of branching
@@ -378,7 +382,9 @@ Manager::Manager() {
 }
 
 Manager::~Manager() {
+#ifdef CONF_VERBOSE
   red_printf("Manager::~Manager\n");
+#endif
 }
 
 void Manager::do_not_trace_method(void *addr) {

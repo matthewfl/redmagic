@@ -38,6 +38,8 @@ __asm__("jmp_rax: \n"
 
 #endif
 
+#pragma GCC visibility push(default)
+
 USER_INTERFACE(force_begin_trace);
 USER_INTERFACE(force_end_trace);
 USER_INTERFACE(force_jump_to_trace);
@@ -51,3 +53,5 @@ USER_INTERFACE(begin_merge_block);
 USER_INTERFACE(end_merge_block);
 USER_INTERFACE(begin_branchable_frame);
 USER_INTERFACE(end_branchable_frame);
+
+#pragma GCC visibility pop

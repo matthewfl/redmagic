@@ -30,7 +30,7 @@
 
 // makes it print all the instructions processed and extra info
 #ifdef CONF_DEBUG_BUILD
-//# define CONF_VERBOSE
+# define CONF_VERBOSE
 #endif
 
 // support aborting the system after some fixed number of instruction have been processed, see tools/bisect for debugging with this
@@ -47,7 +47,7 @@
 
 
 // using timers in addition to number of times it loops to determine what to trace
-#define CONF_USE_TIMERS
+//#define CONF_USE_TIMERS
 #define CONF_TIMER_DELAY_MS CONF_BUILD_TOGGLE(0, 5000)
 
 #define CONF_ESTIMATE_INSTRUCTIONS
@@ -55,5 +55,9 @@
 // instead of taking a trace all the way to the bottom of the loop, attempt to merge back at the ret inside of a method
 // the idea being that most of the branches that we can end up helping will be inside the main interpreter loop
 #define CONF_MERGE_BACK_ON_RET
+
+//#define CONF_CHECK_RET_ADDRESS
+
+#define CONF_CHECK_MERGE_RIP
 
 #endif // REDMAGIC_CONFIG_H_
