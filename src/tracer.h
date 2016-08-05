@@ -113,6 +113,9 @@ namespace redmagic {
 
     mem_loc_t merge_close_core();
 
+    // patch in the correct address for a given merge block stack
+    void patch_merge_block(tracer_merge_block_stack_s*);
+
     inline register_t pop_stack() {
       register_t r = *((register_t*)((mem_loc_t)regs_struct->rsp + move_stack_by));
       move_stack_by += sizeof(register_t);
@@ -208,9 +211,12 @@ namespace redmagic {
 
     int32_t *finish_patch_addr = nullptr;
 
-    std::vector<mem_loc_t, RealMallocAllocator<mem_loc_t> > method_address_stack;
-    std::vector<mem_loc_t, RealMallocAllocator<mem_loc_t> > method_sp_stack;
-    std::vector<mem_loc_t, RealMallocAllocator<mem_loc_t> > merge_block_stack;
+    // std::vector<mem_loc_t, RealMallocAllocator<mem_loc_t> > method_address_stack;
+    // std::vector<mem_loc_t, RealMallocAllocator<mem_loc_t> > method_sp_stack;
+    // std::vector<mem_loc_t, RealMallocAllocator<mem_loc_t> > merge_block_stack;
+
+    std::vector<tracer_method_stack_s, RealMallocAllocator<tracer_method_stack_s> > method_stack;
+    std::vector<tracer_merge_block_stack_s, RealMallocAllocator<tracer_merge_block_stack_s> > merge_block_stack;
 
     mem_loc_t merge_resume = 0;
 

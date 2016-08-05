@@ -1,6 +1,6 @@
 #include "asm_macros.S"
 
-
+#include "config.h"
 
   .global red_asm_resume_tracer_block_start
   .global red_asm_resume_tracer_block_end
@@ -67,14 +67,24 @@ red_asm_restart_trace:
   movq %r9, %rsi
   movq %rsp, %rdx
   movq %r8, %rcx
+#ifdef CONF_CHECK_MERGE_RIP
+  movq %r11, %r8
+#endif
 
   // restore the origional values of r10,9,8
   movq 216(%rsp), %r10
   movq 224(%rsp), %r9
-  movq 232(%rsp), %r8
+  // vvv moving the r8 register
+  movq 232(%rsp), %rax
+#ifdef CONF_CHECK_MERGE_RIP
+  movq 240(%rsp), %r11
+#endif
   movq %r10, 56(%rsp)
   movq %r9, 64(%rsp)
-  movq %r8, 72(%rsp)
+  movq %rax, 72(%rsp)
+#ifdef CONF_CHECK_MERGE_RIP
+  movq %r11, 48(%rsp)
+#endif
 
   call red_resume_trace@plt
   m_pop_all_regs

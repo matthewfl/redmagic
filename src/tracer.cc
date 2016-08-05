@@ -74,11 +74,16 @@ Tracer::Tracer(CodeBuffer* buffer) {
 
   interrupt_block_location = written.getRawBuffer();
 
-  method_address_stack.reserve(100);
-  method_sp_stack.reserve(100);
-  method_sp_stack.push_back(-1);
+  // method_address_stack.reserve(100);
+  // method_sp_stack.reserve(100);
+  // method_sp_stack.push_back(-1);
+  // merge_block_stack.reserve(100);
+  // merge_block_stack.push_back(0);
+
+  method_stack.reserve(100);
+  method_stack.push_back(tracer_method_stack_s(0, -1));
   merge_block_stack.reserve(100);
-  merge_block_stack.push_back(0);
+  merge_block_stack.push_back(tracer_merge_block_stack_s());
 
   tracing_from = 0;
 }
@@ -98,12 +103,17 @@ void red_begin_tracing(struct user_regs_struct *other_stack, void* __, Tracer* t
   __builtin_unreachable();
 }
 
-extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_address, struct user_regs_struct *regs_struct, mem_loc_t merge_addr) {
+extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_address, struct user_regs_struct *regs_struct, mem_loc_t merge_addr
+#ifdef CONF_CHECK_MERGE_RIP
+                                   , mem_loc_t merge_rip_check
+#endif
+                                   ) {
 
   using redmagic::register_t;
   // the dummy values
   assert(write_jump_address != 0xfafafafafafafafa);
   assert(merge_addr != 0xfbfbfbfbfbfbfbfb);
+  assert(merge_rip_check != 0xfcfcfcfcfcfcfcfc);
 
   // that this is a jump with a rel32 term to the next line and is aligned properly
   assert(*(uint8_t*)write_jump_address == 0xE9);
@@ -347,10 +357,15 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
     assert(protected_malloc);
     //assert(generation_lock.owns_lock());
 
-    assert(method_sp_stack.back() >= regs_struct->rsp + move_stack_by);
-    assert(method_sp_stack.size() == method_address_stack.size() + 1);
+//     assert(method_sp_stack.back() >= regs_struct->rsp + move_stack_by);
+//     assert(method_sp_stack.size() == method_address_stack.size() + 1);
+// #ifdef CONF_MERGE_BACK_ON_RET
+//     assert(merge_block_stack.size() > method_address_stack.size());
+// #endif
+
+    assert(method_stack.back().return_stack_pointer >= regs_struct->rsp + move_stack_by);
 #ifdef CONF_MERGE_BACK_ON_RET
-    assert(merge_block_stack.size() > method_address_stack.size());
+    assert(merge_block_stack.size() > method_stack.size());
 #endif
 
     // if we somehow have less then 1kb free then we might have overwritten something
@@ -543,12 +558,13 @@ void* Tracer::EndTraceFallthrough(bool check_id) {
     wb.replace_stump<uint64_t>(0xfafafafafafafafa, w.getRawBuffer());
   }
 #ifdef CONF_MERGE_BACK_ON_RET
-  assert(merge_block_stack.size() == method_address_stack.size() + 1);
+  assert(merge_block_stack.size() == method_stack.size());
 #else
   assert(merge_block_stack.size() == 1);
 #endif
   merge_resume = 0;
-  for(mem_loc_t write_addr : merge_block_stack) {
+  for(auto merge_block : merge_block_stack) {
+    mem_loc_t write_addr = merge_block.merge_head;
     while(write_addr != 0) {
       mem_loc_t next_addr = *(mem_loc_t*)write_addr;
       *(mem_loc_t*)write_addr = 0;
@@ -556,10 +572,9 @@ void* Tracer::EndTraceFallthrough(bool check_id) {
     }
   }
   merge_block_stack.clear();
-  merge_block_stack.push_back(0);
-  method_address_stack.clear();
-  method_sp_stack.clear();
-  method_sp_stack.push_back(-1);
+  merge_block_stack.push_back(tracer_merge_block_stack_s());
+  method_stack.clear();
+  method_stack.push_back(tracer_method_stack_s(0, -1));
   finish_patch();
   tracing_from = 0;
   return (uint8_t*)w.getRawBuffer() + compiler.getLabelOffset(rlabel);
@@ -593,20 +608,18 @@ void* Tracer::EndTraceLoop() {
   auto written = compiler.finalize();
   wb.replace_stump<uint64_t>(0xfafafafafafafafa, written.getRawBuffer());
   assert(merge_block_stack.size() == 1);
-  assert(method_address_stack.size() == 0);
-  assert(method_sp_stack.size() == 1);
+  assert(method_stack.size() == 1);
   assert(merge_resume == 0);
-  mem_loc_t write_addr = merge_block_stack[0];
-  merge_block_stack[0] = 0;
+  mem_loc_t write_addr = merge_block_stack[0].merge_head;
+  merge_block_stack[0] = tracer_merge_block_stack_s();
   merge_resume = 0;
   while(write_addr != 0) {
     mem_loc_t next_addr = *(mem_loc_t*)write_addr;
     *(mem_loc_t*)write_addr = 0;
     write_addr = next_addr;
   }
-  method_address_stack.clear();
-  method_sp_stack.clear();
-  method_sp_stack.push_back(-1);
+  method_stack.clear();
+  method_stack.push_back(tracer_method_stack_s(0, -1));
   finish_patch();
   tracing_from = 0;
   return (void*)loop_location;
@@ -670,19 +683,18 @@ void* Tracer::EndTraceEnsure() {
   auto w = compiler.finalize();
 
   merge_resume = 0;
-  while(merge_block_stack.size() > 0) {
-    mem_loc_t write_addr = merge_block_stack.back();
-    merge_block_stack.pop_back();
+  for(auto merge_block : merge_block_stack) {
+    mem_loc_t write_addr = merge_block.merge_head;
     while(write_addr != 0) {
       mem_loc_t next_addr = *(mem_loc_t*)write_addr;
       *(mem_loc_t*)write_addr = 0;
       write_addr = next_addr;
     }
   }
-  merge_block_stack.push_back(0);
-  method_address_stack.clear();
-  method_sp_stack.clear();
-  method_sp_stack.push_back(-1);
+  merge_block_stack.clear();
+  merge_block_stack.push_back(tracer_merge_block_stack_s());
+  method_stack.clear();
+  method_stack.push_back(tracer_method_stack_s(0, -1));
 
   finish_patch();
   tracing_from = 0;
@@ -774,7 +786,7 @@ void* Tracer::BeginMergeBlock() {
   mem_loc_t ret = buffer->getRawBuffer() + buffer->getOffset();
   // there are no instructions to generate for this
   write_interrupt_block();
-  merge_block_stack.push_back(0);
+  merge_block_stack.push_back(tracer_merge_block_stack_s());
   return (void*)ret;
 }
 
@@ -790,8 +802,6 @@ void* Tracer::EndMergeBlock() {
     ret = res_addr;
 
   return (void*)ret;
-
-  assert(0);
 }
 
 mem_loc_t Tracer::merge_close_core() {
@@ -803,8 +813,8 @@ mem_loc_t Tracer::merge_close_core() {
     compiler.jmp(asmjit::imm_ptr(resume_a));
     compiler.mov(asmjit::x86::r15, asmjit::imm_u(0xdeadbeef3));
     compiler.finalize();
-    mem_loc_t write_addr = merge_block_stack[0];
-    merge_block_stack[0] = 0;
+    mem_loc_t write_addr = merge_block_stack[0].merge_head;
+    merge_block_stack[0] = tracer_merge_block_stack_s();
     // write the parent's jump address
     while(write_addr != 0) {
       mem_loc_t next_addr = *(mem_loc_t*)write_addr;
@@ -816,9 +826,8 @@ mem_loc_t Tracer::merge_close_core() {
     finish_patch();
     tracing_from = 0;
     merge_resume = 0;
-    method_address_stack.clear();
-    method_sp_stack.clear();
-    method_sp_stack.push_back(-1);
+    method_stack.clear();
+    method_stack.push_back(tracer_method_stack_s(0,-1));
 
     // stuff usually done by manager....TODO: converge to a single method
     auto head = manager->get_tracer_head();
@@ -855,7 +864,7 @@ mem_loc_t Tracer::merge_close_core() {
     return resume_a;
   } else {
     mem_loc_t merge_addr = buffer->getRawBuffer() + buffer->getOffset();
-    mem_loc_t write_addr = merge_block_stack.back();
+    mem_loc_t write_addr = merge_block_stack.back().merge_head;
     merge_block_stack.pop_back();
     while(write_addr != 0) {
       mem_loc_t next_addr = *(mem_loc_t*)write_addr;
@@ -865,6 +874,10 @@ mem_loc_t Tracer::merge_close_core() {
     return 0;
   }
   assert(0);
+}
+
+void Tracer::patch_merge_block(tracer_merge_block_stack_s *merge_block) {
+
 }
 
 
@@ -1465,9 +1478,9 @@ void Tracer::evaluate_instruction() {
     assert(jump_dest != 0);
     if(last_call_instruction + 1 == icount) {
       // we are jumping to a method eg dynamically loaded, so change what we think the methods address is
-      assert(!method_address_stack.empty());
-      assert(method_sp_stack.back() == regs_struct->rsp + move_stack_by);
-      method_address_stack.back() = jump_dest;
+      assert(!method_stack.empty());
+      assert(method_stack.back().return_stack_pointer == regs_struct->rsp + move_stack_by);
+      method_stack.back().method_address = jump_dest;
     }
     if(!manager->should_trace_method((void*)jump_dest)) {
       mem_loc_t cont_addr;
@@ -1475,8 +1488,7 @@ void Tracer::evaluate_instruction() {
         // then the first operation in this method was a jump, which means that we were probably jumping through a redirect with the dynamic linker
         buffer->setOffset(last_call_generated_op);
         pop_stack();
-        method_address_stack.pop_back(); // have to pop since we aren't inlining this
-        method_sp_stack.pop_back();
+        method_stack.pop_back(); // have to pop since we aren't inlining this
 #ifdef CONF_MERGE_BACK_ON_RET
         mem_loc_t merge_res = merge_close_core();
         assert(merge_res == 0);
@@ -1541,19 +1553,19 @@ void Tracer::evaluate_instruction() {
         current_not_traced_call_ret_loc = nullptr;
         icount++; // this prevents the next instruction if it is a jump from thinking it is the first in a method
 
-        assert(method_sp_stack.back() >= regs_struct->rsp + move_stack_by - sizeof(register_t));
+        assert(method_stack.back().return_stack_pointer >= regs_struct->rsp + move_stack_by - sizeof(register_t));
 #ifdef CONF_MERGE_BACK_ON_RET
-        if(method_sp_stack.back() == -1 || method_sp_stack.back() == regs_struct->rsp + move_stack_by - sizeof(register_t)) {
+        if(method_stack.back().return_stack_pointer == -1 ||
+           method_stack.back().return_stack_pointer == regs_struct->rsp + move_stack_by - sizeof(register_t)) {
           mem_loc_t merge_close = merge_close_core();
           if(merge_close) // this might have an issue with the tracer getting free and then using it when it trys to continue the program
             continue_program(merge_close);
         }
 #endif
-        if(method_sp_stack.back() == regs_struct->rsp + move_stack_by - sizeof(register_t)) {
-          assert(!method_address_stack.empty());
+        if(method_stack.back().return_stack_pointer == regs_struct->rsp + move_stack_by - sizeof(register_t)) {
+          assert(!method_stack.empty());
           //assert(method_sp_stack.back() == regs_struct->rsp + move_stack_by - sizeof(register_t));
-          method_address_stack.pop_back();
-          method_sp_stack.pop_back();
+          method_stack.pop_back();
         }
 
         return;
@@ -1694,11 +1706,10 @@ void Tracer::evaluate_instruction() {
       auto w = compiler.finalize();
       push_stack(ret_addr);
       set_pc(call_pc);
-      method_address_stack.push_back(call_pc);
-      assert(regs_struct->rsp + move_stack_by <= method_sp_stack.back());
-      method_sp_stack.push_back(regs_struct->rsp + move_stack_by);
+      assert(regs_struct->rsp + move_stack_by <= method_stack.back().return_stack_pointer);
+      method_stack.push_back(tracer_method_stack_s(call_pc, regs_struct->rsp + move_stack_by));
 #ifdef CONF_MERGE_BACK_ON_RET
-      merge_block_stack.push_back(0);
+      merge_block_stack.push_back(tracer_merge_block_stack_s());
 #endif
     }
 
@@ -1729,19 +1740,19 @@ void Tracer::evaluate_instruction() {
     buffer->writeToEnd(cb_asm_pop_stack);
     //#endif
 
-    assert(method_sp_stack.back() >= regs_struct->rsp + move_stack_by - sizeof(register_t));
+    assert(method_stack.back().return_stack_pointer >= regs_struct->rsp + move_stack_by - sizeof(register_t));
 #ifdef CONF_MERGE_BACK_ON_RET
-    if(method_sp_stack.back() == -1 || method_sp_stack.back() == regs_struct->rsp + move_stack_by - sizeof(register_t)) {
+    if(method_stack.back().return_stack_pointer == -1 ||
+       method_stack.back().return_stack_pointer == regs_struct->rsp + move_stack_by - sizeof(register_t)) {
       mem_loc_t merge_close = merge_close_core();
       if(merge_close) // this might have an issue with the tracer getting free and then using it when it trys to continue the program
         continue_program(merge_close);
     }
 #endif
-    if(method_sp_stack.back() == regs_struct->rsp + move_stack_by - sizeof(register_t)) {
-      assert(!method_address_stack.empty());
+    if(method_stack.back().return_stack_pointer == regs_struct->rsp + move_stack_by - sizeof(register_t)) {
+      assert(!method_stack.empty());
       //assert(method_sp_stack.back() == regs_struct->rsp + move_stack_by - sizeof(register_t));
-      method_address_stack.pop_back();
-      method_sp_stack.pop_back();
+      method_stack.pop_back();
     }
     return;
   }
@@ -1949,8 +1960,8 @@ void Tracer::kill_trace() {
 }
 
 void Tracer::blacklist_function() {
-  assert(!method_address_stack.empty());
+  assert(!method_stack.empty());
   // blacklist this current method
-  manager->do_not_trace_method((void*)method_address_stack.back());
+  manager->do_not_trace_method((void*)method_stack.back().method_address);
   kill_trace();
 }

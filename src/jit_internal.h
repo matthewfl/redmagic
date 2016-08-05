@@ -145,7 +145,6 @@ namespace redmagic {
 
   // if we have nested tracers eg an outer loop calls an inner loop
   // or if we have an outter tracer disabled and an inner tracer running still
-  //
   struct tracer_stack_state {
     Tracer *tracer = nullptr;
     void *resume_addr = nullptr;
@@ -164,6 +163,25 @@ namespace redmagic {
 
     //void *d_ret = nullptr;
     //bool did_abort = false;
+  };
+
+  struct tracer_method_stack_s {
+    mem_loc_t method_address;
+    mem_loc_t return_stack_pointer;
+
+    tracer_method_stack_s(mem_loc_t a=0, mem_loc_t b=0):
+      method_address(a), return_stack_pointer(b) {}
+  };
+
+  struct tracer_merge_block_stack_s {
+    mem_loc_t merge_head = 0; // head of linked list for this merge point
+
+#ifdef CONF_CHECK_MERGE_RIP
+    mem_loc_t merge_rip_head = 0;
+#endif
+
+
+    tracer_merge_block_stack_s() {}
   };
 
   //extern thread_local std::vector<tracer_stack_state> trace_return_addr;
