@@ -344,11 +344,6 @@ void SimpleCompiler::do_merge_addr(CodeBuffer &buff, tracer_merge_block_stack_s 
   // make a linked list out of address where we are going to write this merge address
   *ma = merge_block->merge_head;
   merge_block->merge_head = (mem_loc_t)ma;
-#ifdef CONF_CHECK_MERGE_RIP
-  ma = buff.find_stump<mem_loc_t>(0xfcfcfcfcfcfcfcfc);
-  *ma = merge_block->merge_rip_head;
-  merge_block->merge_rip_head = (mem_loc_t)ma;
-#endif
 }
 
 void SimpleCompiler::ResumeBlockJump(mem_loc_t resume_pc) {
@@ -361,9 +356,6 @@ void SimpleCompiler::ResumeBlockJump(mem_loc_t resume_pc) {
   mov(x86::ptr(x86::rsp, -TRACE_STACK_OFFSET + 216), x86::r10);
   mov(x86::ptr(x86::rsp, -TRACE_STACK_OFFSET + 224), x86::r9);
   mov(x86::ptr(x86::rsp, -TRACE_STACK_OFFSET + 232), x86::r8);
-#ifdef CONF_CHECK_MERGE_RIP
-  mov(x86::ptr(x86::rsp, -TRACE_STACK_OFFSET + 240), x86::r11);
-#endif
   mov(x86::r10, imm_u(resume_pc));
   // TODO: have this load the address of the instruction that jumped here instead of just this block
   // this will allow for it to easily write in a direct jump, as being designed now, we will have to redirect the jump through this indirection
@@ -371,9 +363,6 @@ void SimpleCompiler::ResumeBlockJump(mem_loc_t resume_pc) {
   // also, this will not work with concurrent threads
   lea(x86::r9, x86::ptr(label));
   mov(x86::r8, imm_u(0xfbfbfbfbfbfbfbfb));
-#ifdef CONF_CHECK_MERGE_RIP
-  mov(x86::r11, imm_u(0xfcfcfcfcfcfcfcfc));
-#endif
 
   jmp(imm_ptr(&red_asm_restart_trace));
 

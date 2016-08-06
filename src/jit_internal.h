@@ -127,6 +127,16 @@ namespace redmagic {
       std::equal_to<void*>,
       RealMallocAllocator<std::pair<const void*, branch_info>>
       > branches;
+
+#ifdef CONF_CHECK_MERGE_RIP
+    std::unordered_map<
+      mem_loc_t,
+      mem_loc_t,
+      std::hash<mem_loc_t>,
+      std::equal_to<mem_loc_t>,
+      RealMallocAllocator<std::pair<const mem_loc_t, mem_loc_t>>
+      > merge_rip;
+#endif
   private:
     std::unordered_set<
       void*,

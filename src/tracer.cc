@@ -103,17 +103,12 @@ void red_begin_tracing(struct user_regs_struct *other_stack, void* __, Tracer* t
   __builtin_unreachable();
 }
 
-extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_address, struct user_regs_struct *regs_struct, mem_loc_t merge_addr
-#ifdef CONF_CHECK_MERGE_RIP
-                                   , mem_loc_t merge_rip_check
-#endif
-                                   ) {
+extern "C" void red_resume_trace(mem_loc_t target_rip, mem_loc_t write_jump_address, struct user_regs_struct *regs_struct, mem_loc_t merge_addr) {
 
   using redmagic::register_t;
   // the dummy values
   assert(write_jump_address != 0xfafafafafafafafa);
   assert(merge_addr != 0xfbfbfbfbfbfbfbfb);
-  assert(merge_rip_check != 0xfcfcfcfcfcfcfcfc);
 
   // that this is a jump with a rel32 term to the next line and is aligned properly
   assert(*(uint8_t*)write_jump_address == 0xE9);
@@ -365,7 +360,7 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
 
     assert(method_stack.back().return_stack_pointer >= regs_struct->rsp + move_stack_by);
 #ifdef CONF_MERGE_BACK_ON_RET
-    assert(merge_block_stack.size() > method_stack.size());
+    assert(merge_block_stack.size() >= method_stack.size());
 #endif
 
     // if we somehow have less then 1kb free then we might have overwritten something
@@ -821,6 +816,10 @@ mem_loc_t Tracer::merge_close_core() {
       *(mem_loc_t*)write_addr = resume_a;
       write_addr = next_addr;
     }
+#ifdef CONF_CHECK_MERGE_RIP
+    mem_loc_t merge_rip = manager->merge_rip[resume_a];
+    assert(merge_rip == udis_loc);
+#endif
 
     // the ending of this tracer instructions
     finish_patch();
@@ -871,13 +870,12 @@ mem_loc_t Tracer::merge_close_core() {
       *(mem_loc_t*)write_addr = merge_addr;
       write_addr = next_addr;
     }
+#ifdef CONF_CHECK_MERGE_RIP
+    manager->merge_rip[merge_addr] = udis_loc;
+#endif
     return 0;
   }
   assert(0);
-}
-
-void Tracer::patch_merge_block(tracer_merge_block_stack_s *merge_block) {
-
 }
 
 

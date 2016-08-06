@@ -54,7 +54,7 @@
 
 // instead of taking a trace all the way to the bottom of the loop, attempt to merge back at the ret inside of a method
 // the idea being that most of the branches that we can end up helping will be inside the main interpreter loop
-//#define CONF_MERGE_BACK_ON_RET
+#define CONF_MERGE_BACK_ON_RET
 
 //#define CONF_CHECK_RET_ADDRESS
 

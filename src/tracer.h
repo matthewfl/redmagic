@@ -113,9 +113,6 @@ namespace redmagic {
 
     mem_loc_t merge_close_core();
 
-    // patch in the correct address for a given merge block stack
-    void patch_merge_block(tracer_merge_block_stack_s*);
-
     inline register_t pop_stack() {
       register_t r = *((register_t*)((mem_loc_t)regs_struct->rsp + move_stack_by));
       move_stack_by += sizeof(register_t);
