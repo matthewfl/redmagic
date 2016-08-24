@@ -46,7 +46,7 @@ def main():
     error_search = ['IndexError', 'Assertion', 'SIGSEGV', 'Traceback']
     #process = '/home/matthew/developer/cpython/python -m IPython -c exit()'.split()
     # run under gdb since the program seems to change behavor depending on how it is run
-    process = ['gdb', '/home/matthew/developer/cpython/python', '--eval-command=run -m IPython -c "exit()"', '--eval-command=quit']
+    process = ['gdb', '/home/matthew/developer/cpython/python', '--eval-command=run -m IPython -c "exit()"', '--eval-command=quit', '-batch']
 
     try:
         while max_i - min_i > 2:

@@ -6,6 +6,8 @@
 
 #include <algorithm>
 
+#include "build_version.h"
+
 using namespace redmagic;
 using namespace std;
 
@@ -141,7 +143,7 @@ extern "C" void *__real_malloc(size_t);
 
 extern "C" void redmagic_start() {
   UnprotectMalloc upm;
-  red_printf("Using redmagic jit by Matthew Francis-Landau <matthew@matthewfl.com>\n");
+  red_printf("Using redmagic jit by Matthew Francis-Landau <matthew@matthewfl.com> version: " RED_BUILD_VERSION "\n");
   if(manager != nullptr) {
     red_printf("redmagic_start called twice");
     abort();
@@ -531,7 +533,7 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
       new_head = head;
 #ifdef CONF_ESTIMATE_INSTRUCTIONS
       head->num_backwards_loops++;
-      if(head->num_backwards_loops > (info->count / 8)) {
+      if(head->num_backwards_loops > (info->count / 8) || (head->num_backwards_loops > 2 && info->avg_observed_instructions == 0)) {
         uint64_t icnt = instruction_cnt();
         info->avg_observed_instructions = (icnt - head->instruction_cnt_at_start - head->sub_frame_num_instructions) / head->num_backwards_loops;
       }
@@ -565,10 +567,10 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
 #ifndef NDEBUG
         if(info->tracer->owning_thread == get_thread_id()) {
           // this is a recursive frame
-          for(auto t : threadl_tracer_stack) {
-            if(t.trace_id == id) {
+          for(int i = threadl_tracer_stack.size() - 2; i >= 0; i--) {
+            if(threadl_tracer_stack[i].trace_id == id) {
               // we found this that was tracing from
-              assert(t.frame_id != branchable_frame_id);
+              assert(threadl_tracer_stack[i].frame_id != branchable_frame_id);
               return start_addr;
             }
           }
@@ -875,10 +877,17 @@ void* Manager::end_branchable_frame(void *ret_addr, void **stack_ptr) {
       // this method will get call again with this current frame poped
       return ret;
     } else {
+      if(head->trace_id != nullptr) {
+        auto info = &branches[head->trace_id];
+        info->count_fellthrough++;
+      }
       pop_tracer_stack();
       head = get_tracer_head();
 
       if(head->resume_addr) {
+        // assert that this is a call instruction
+        assert(((uint8_t*)ret_addr)[-5] == 0xE8);
+
         if(head->tracer) {
           head->tracer->JumpFromNestedLoop((uint8_t*)ret_addr - 5); // backup the pc to the call instruction
         }
@@ -944,7 +953,7 @@ tracer_stack_state *Manager::get_tracer_head() {
     // tracer_stack_state e;
     // threadl_tracer_stack.push_back(e);
     push_tracer_stack();
-    stack_head = &threadl_tracer_stack[0];
+    //    stack_head = &threadl_tracer_stack[0];
   }
   return stack_head;
 }

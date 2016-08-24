@@ -43,7 +43,7 @@
 // unable to determine where it should actually be performing this, so we are just makeing the end of the branchable frame
 // close out any traces that were created in this frame
 // ^^^ this might have been a bug with the intergration, but now it is using this auto closing as a "feature"
-#define CONF_ALLOW_UNCLOSED_TRACES
+//#define CONF_ALLOW_UNCLOSED_TRACES
 
 
 // using timers in addition to number of times it loops to determine what to trace

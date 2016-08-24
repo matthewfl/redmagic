@@ -22,6 +22,7 @@ C_FLAGS = (
     '-I ./deps/ '
     '-I ./deps/udis86 '
     '-I ./deps/asmjit/src '
+    '-I ./build/ '
 )
 CXX_FLAGS = (
     '-std=c++14 '
@@ -95,6 +96,13 @@ def link():
     after()
 
 def compile():
+    with open('build/build_version.h', 'w+') as f:
+        f.write('''
+#ifndef RED_BUILD_VERSION
+#define RED_BUILD_VERSION "{}"
+#endif
+        '''.format(GIT_VERSION))
+
     for f in glob.glob('src/*.cc'):
         Run('{CXX} {} -c {} -o {}'.format(
             C_FLAGS + CXX_FLAGS,

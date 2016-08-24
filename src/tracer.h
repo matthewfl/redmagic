@@ -215,7 +215,10 @@ namespace redmagic {
     std::vector<tracer_method_stack_s, RealMallocAllocator<tracer_method_stack_s> > method_stack;
     std::vector<tracer_merge_block_stack_s, RealMallocAllocator<tracer_merge_block_stack_s> > merge_block_stack;
 
+    mem_loc_t run_starting_stack_pointer = 0;
+
     mem_loc_t merge_resume = 0;
+
 
     uint64_t *trace_loop_counter = nullptr;
 

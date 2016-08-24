@@ -52,6 +52,13 @@ namespace redmagic {
 
   struct tracer_stack_state;
 
+  template<typename Key, typename Value>
+  using RealMallocMap = std::unordered_map<Key, Value, std::hash<Key>, std::equal_to<Key>, RealMallocAllocator<std::pair<const Key, Value>>>;
+
+  template<typename Value>
+  using RealMallocSet = std::unordered_set<Value, std::hash<Value>, std::equal_to<Value>, RealMallocAllocator<Value>>;
+
+
   class Manager {
   public:
     Manager();
@@ -119,31 +126,34 @@ namespace redmagic {
 #endif
     };
 
-    std::unordered_map<
-      void*,
-      branch_info,
-      // should be the same as normal
-      std::hash<void*>,
-      std::equal_to<void*>,
-      RealMallocAllocator<std::pair<const void*, branch_info>>
-      > branches;
+    // std::unordered_map<
+    //   void*,
+    //   branch_info,
+    //   // should be the same as normal
+    //   std::hash<void*>,
+    //   std::equal_to<void*>,
+    //   RealMallocAllocator<std::pair<const void*, branch_info>>
+    //   >
+    RealMallocMap<void*, branch_info> branches;
 
 #ifdef CONF_CHECK_MERGE_RIP
-    std::unordered_map<
-      mem_loc_t,
-      mem_loc_t,
-      std::hash<mem_loc_t>,
-      std::equal_to<mem_loc_t>,
-      RealMallocAllocator<std::pair<const mem_loc_t, mem_loc_t>>
-      > merge_rip;
+    // std::unordered_map<
+    //   mem_loc_t,
+    //   mem_loc_t,
+    //   std::hash<mem_loc_t>,
+    //   std::equal_to<mem_loc_t>,
+    //   RealMallocAllocator<std::pair<const mem_loc_t, mem_loc_t>>
+    //   >
+    RealMallocMap<mem_loc_t, RealMallocSet<mem_loc_t> > merge_rip;
 #endif
   private:
-    std::unordered_set<
-      void*,
-      std::hash<void*>,
-      std::equal_to<void*>,
-      RealMallocAllocator<void*>
-      > no_trace_methods;
+    // std::unordered_set<
+    //   void*,
+    //   std::hash<void*>,
+    //   std::equal_to<void*>,
+    //   RealMallocAllocator<void*>
+    //   >
+    RealMallocSet<void*> no_trace_methods;
 
     std::atomic<uint32_t> thread_id_counter;
 
@@ -179,17 +189,16 @@ namespace redmagic {
     mem_loc_t method_address;
     mem_loc_t return_stack_pointer;
 
+#ifdef CONF_MERGE_BACK_ON_RET
+    int corresponding_merge_block = 0;
+#endif
+
     tracer_method_stack_s(mem_loc_t a=0, mem_loc_t b=0):
       method_address(a), return_stack_pointer(b) {}
   };
 
   struct tracer_merge_block_stack_s {
     mem_loc_t merge_head = 0; // head of linked list for this merge point
-
-#ifdef CONF_CHECK_MERGE_RIP
-    mem_loc_t merge_rip_head = 0;
-#endif
-
 
     tracer_merge_block_stack_s() {}
   };
@@ -307,6 +316,7 @@ namespace redmagic {
         location++;
       }
       assert(did_find == 1);
+      assert(*ret == from);
       return ret;
     }
 
