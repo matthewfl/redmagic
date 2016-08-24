@@ -1,10 +1,12 @@
-bochs instrumentation allows for recording all the instructions that are performed and no gui
+Redmagic is a meta tracing JIT for x86.  It operates by creating traces for interpreters written in C/C++ from the x86_64 instruction level.
 
-qemu in the target/ translate.c contains instructions to dispatch the x86 instrunctions
-
-parts of qemu are under difference licenses, so the code generator is bsd, and the target for i386 is lgpl
-
-base52 decoding mit licence from bitcoin
+See src/redmagic.h for the JITs interface.
 
 
-qemu version dfa83a6bae960e3e3a3186264d75790cfd727bce 2.3.1
+license: LGPLv3
+
+
+build instructions:
+      pacman -S strace python2
+      git submodules update --init --recursive
+      ./make release

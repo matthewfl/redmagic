@@ -431,7 +431,7 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
 #endif
 
 #ifndef NDEBUG
-      if(global_debugger_int != -1 && global_debugger_int == global_icount) {
+      if(global_debugger_int == global_icount) {
         __asm__("int3\n");
       }
 #endif
