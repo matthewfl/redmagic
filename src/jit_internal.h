@@ -172,6 +172,11 @@ namespace redmagic {
     bool is_temp_disabled = false;
     bool is_traced = false;
     bool is_compiled = false;
+
+    // when this frame is poped if it should use the return address in the frame above it
+    // essentially if this frame was created from a tracer
+    bool return_to_trace_when_done = false;
+
     int32_t frame_id = -1;
 
 

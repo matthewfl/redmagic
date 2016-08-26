@@ -189,7 +189,8 @@ extern "C" void red_set_temp_resume(void *resume_addr) {
   assert(head->resume_addr == nullptr);
   head->resume_addr = resume_addr;
   head->is_temp_disabled = true;
-  manager->push_tracer_stack();
+  auto new_head = manager->push_tracer_stack();
+  new_head->return_to_trace_when_done = true;
 }
 
 extern "C" void* red_end_trace(mem_loc_t normal_end_address) {
@@ -205,6 +206,7 @@ extern "C" void* red_end_trace(mem_loc_t normal_end_address) {
       new_head->tracer->JumpFromNestedLoop((void*)normal_end_address);
     }
     if(new_head->resume_addr) {
+      assert(head.return_to_trace_when_done);
       ret = new_head->resume_addr;
       new_head->resume_addr = nullptr;
     } else {
@@ -242,6 +244,8 @@ extern "C" void* red_branch_to_sub_trace(void *resume_addr, void *sub_trace_id, 
   protected_malloc = false;
   void *ret = manager->backwards_branch(sub_trace_id, target_rip);
   protected_malloc = true;
+  auto new_head = manager->get_tracer_head();
+  new_head->return_to_trace_when_done = true;
   return ret;
 
 }

@@ -53,6 +53,8 @@ int main(int argc, char* argv[]) {
 
   float a = 1.2;
 
+  redmagic_begin_branchable_frame(NULL);
+
   while(1) {
     switch(program[pc]) {
     case PRINT_NUM:
@@ -101,6 +103,8 @@ int main(int argc, char* argv[]) {
       exit(-1);
     }
   }
+
+  redmagic_end_branchable_frame(NULL);
 
 
   // redmagic_force_begin_trace((void*)123);

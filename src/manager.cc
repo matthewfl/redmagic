@@ -122,18 +122,22 @@ extern "C" void* red_user_end_merge_block(void *_, void *ret_addr) {
 extern "C" void* red_user_begin_branchable_frame(uint64_t *frame_id, void *ret_addr) {
   UnprotectMalloc upm;
   branchable_frame_id++;
+#ifndef NDEBUG
   if(frame_id != NULL) {
     *frame_id = 0xdead0000 | branchable_frame_id;
   }
+#endif
   return NULL;
 }
 
 extern "C" void* red_user_end_branchable_frame(uint64_t *frame_id, void *ret_addr, void **stack_ptr) {
   UnprotectMalloc upm;
   // TODO: less of a hack, issue when call multiple times in a row
+#ifndef NDEBUG
   if(frame_id != NULL && (void**)frame_id - stack_ptr > 0) {
     assert(*frame_id == 0xdead0000 | branchable_frame_id);
   }
+#endif
   return manager->end_branchable_frame(ret_addr, stack_ptr);
 }
 
@@ -402,58 +406,59 @@ uint32_t Manager::get_thread_id() {
 
 void* Manager::begin_trace(void *id, void *ret_addr) {
   assert(0); // TODO: rewrite this method
+  return NULL;
 
-  branch_info *info = &branches[id];
-  if(info->disabled)
-    return NULL; // do not trace this loop
+  // branch_info *info = &branches[id];
+  // if(info->disabled)
+  //   return NULL; // do not trace this loop
 
-  auto old_head = get_tracer_head();
+  // auto old_head = get_tracer_head();
 
-  void *trace_pc = ret_addr;
+  // void *trace_pc = ret_addr;
 
-  void *ret;
-  Tracer *l;
-  {
-    // assert(old_head->tracer == nullptr); // TODO: in the future allow for nesting tracers, since there might be an inner loop
-    if(old_head->tracer) {
-      if(old_head->tracer->did_abort) {
-        red_printf("won't subtrace since there was an abort\n");
-      } else {
-        assert(old_head->resume_addr == nullptr);
-        old_head->tracer->JumpToNestedLoop(id);
-        trace_pc = (void*)old_head->tracer->get_pc();
-        assert(old_head->resume_addr != nullptr);
-      }
-    }
-    auto new_head = push_tracer_stack();
+  // void *ret;
+  // Tracer *l;
+  // {
+  //   // assert(old_head->tracer == nullptr); // TODO: in the future allow for nesting tracers, since there might be an inner loop
+  //   if(old_head->tracer) {
+  //     if(old_head->tracer->did_abort) {
+  //       red_printf("won't subtrace since there was an abort\n");
+  //     } else {
+  //       assert(old_head->resume_addr == nullptr);
+  //       old_head->tracer->JumpToNestedLoop(id);
+  //       trace_pc = (void*)old_head->tracer->get_pc();
+  //       assert(old_head->resume_addr != nullptr);
+  //     }
+  //   }
+  //   auto new_head = push_tracer_stack();
 
-    //assert(tracer == nullptr);
-    assert(info->tracer == nullptr || info->tracer->did_abort);
-    assert(info->starting_point == nullptr);
+  //   //assert(tracer == nullptr);
+  //   assert(info->tracer == nullptr || info->tracer->did_abort);
+  //   assert(info->starting_point == nullptr);
 
-    //auto buff = make_shared<CodeBuffer>(4 * 1024 * 1024);
-    auto buff = CodeBuffer::CreateBuffer(1024 * 1024);
-    new_head->tracer = l = new Tracer(buff);
-    l->tracing_from = (mem_loc_t)trace_pc;
-    l->owning_thread = get_thread_id();
-    l->owning_frame_id = branchable_frame_id;
-    // int r = mprotect(this, 4*1024, PROT_READ | PROT_WRITE);
-    // assert(!r);
-    info->tracer = l;
+  //   //auto buff = make_shared<CodeBuffer>(4 * 1024 * 1024);
+  //   auto buff = CodeBuffer::CreateBuffer(1024 * 1024);
+  //   new_head->tracer = l = new Tracer(buff);
+  //   l->tracing_from = (mem_loc_t)trace_pc;
+  //   l->owning_thread = get_thread_id();
+  //   l->owning_frame_id = branchable_frame_id;
+  //   // int r = mprotect(this, 4*1024, PROT_READ | PROT_WRITE);
+  //   // assert(!r);
+  //   info->tracer = l;
 
 
-    // r = mprotect(this, 4*1024, PROT_NONE);
-    // assert(!r);
+  //   // r = mprotect(this, 4*1024, PROT_NONE);
+  //   // assert(!r);
 
-    new_head->trace_id = id;
-    ret = l->Start(trace_pc);
-    new_head->is_traced = true;
-    assert(info->trace_loop_counter == nullptr);
-    info->starting_point = l->get_start_location();
-    info->trace_loop_counter = l->get_loop_counter();
-  }
-  //return NULL;
-  return ret;
+  //   new_head->trace_id = id;
+  //   ret = l->Start(trace_pc);
+  //   new_head->is_traced = true;
+  //   assert(info->trace_loop_counter == nullptr);
+  //   info->starting_point = l->get_start_location();
+  //   info->trace_loop_counter = l->get_loop_counter();
+  // }
+  // //return NULL;
+  // return ret;
 }
 
 extern "C" void* red_end_trace(mem_loc_t);
@@ -461,35 +466,37 @@ extern "C" void* red_end_trace(mem_loc_t);
 void* Manager::end_trace(void *id, void *ret_addr) {
   assert(0); // TODO: rewrite this method
 
-  void *ret;
-  Tracer *l;
-  auto head = get_tracer_head();
-  branch_info *info = &branches[id];
-  if(!head->tracer /*|| head->did_abort*/) {
-    // then we weren't actually running on the tracer
-    return red_end_trace((mem_loc_t)ret_addr);
-  }
-  assert(!info->disabled);
-  assert(head->trace_id == id);
-  assert(head->tracer == info->tracer);
-  l = head->tracer;
+  return NULL;
 
-  // poping of the head will tracer stack will be taken care of by the tracer
-  // ret is going to be the address of the normal execution
-  ret = l->EndTraceFallthrough();
-  //l->tracing_from.store(0); // not needed
+  // void *ret;
+  // Tracer *l;
+  // auto head = get_tracer_head();
+  // branch_info *info = &branches[id];
+  // if(!head->tracer /*|| head->did_abort*/) {
+  //   // then we weren't actually running on the tracer
+  //   return red_end_trace((mem_loc_t)ret_addr);
+  // }
+  // assert(!info->disabled);
+  // assert(head->trace_id == id);
+  // assert(head->tracer == info->tracer);
+  // l = head->tracer;
 
-  info->tracer = head->tracer = nullptr;
+  // // poping of the head will tracer stack will be taken care of by the tracer
+  // // ret is going to be the address of the normal execution
+  // ret = l->EndTraceFallthrough();
+  // //l->tracing_from.store(0); // not needed
 
-  Tracer *expected = nullptr;
-  if(!free_tracer_list.compare_exchange_strong(expected, l)) {
-    // failled to save the tracer to the free list head
-    delete l;
-  }
+  // info->tracer = head->tracer = nullptr;
+
+  // Tracer *expected = nullptr;
+  // if(!free_tracer_list.compare_exchange_strong(expected, l)) {
+  //   // failled to save the tracer to the free list head
+  //   delete l;
+  // }
 
 
-  //return NULL;
-  return ret;
+  // //return NULL;
+  // return ret;
 }
 
 void* Manager::jump_to_trace(void *id) {
@@ -502,6 +509,8 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
   // ignore
   if(id == nullptr)
     return NULL;
+
+  assert(branchable_frame_id >= 0);
 
   tracer_stack_state* head = get_tracer_head();
   tracer_stack_state* new_head = nullptr;
@@ -559,6 +568,9 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
     }
     new_head = push_tracer_stack();
     head = &threadl_tracer_stack[threadl_tracer_stack.size() - 2];
+    if(head->tracer) {
+      new_head->return_to_trace_when_done = true;
+    }
     new_head->trace_id = id;
     if(info->starting_point) {
       info->count++;
@@ -688,9 +700,10 @@ void* Manager::fellthrough_branch(void *id, void *ret_addr) {
       assert(head->resume_addr == nullptr);
       assert(head->is_temp_disabled == false);
       // we have to pop this frame since we weren't being traced and there is nothing that will do it for us
-      pop_tracer_stack();
+      auto old_head = pop_tracer_stack();
       auto new_head = get_tracer_head();
       if(new_head->resume_addr) {
+        assert(old_head.return_to_trace_when_done);
         if(new_head->tracer) {
           // ret_addr will not be a traced address but a real normal address
           // so we set that as the possible resume address if there is a tracer that we are going to be resuming
@@ -755,6 +768,7 @@ void* Manager::temp_enable(void *ret_addr) {
     head->tracer->TempEnableTrace(ret_addr);
   }
   if(head->resume_addr != nullptr) {
+    assert(old_head.return_to_trace_when_done);
     ret = head->resume_addr;
     head->resume_addr = nullptr;
   }
@@ -881,12 +895,13 @@ void* Manager::end_branchable_frame(void *ret_addr, void **stack_ptr) {
         auto info = &branches[head->trace_id];
         info->count_fellthrough++;
       }
-      pop_tracer_stack();
+      auto old_head = pop_tracer_stack();
       head = get_tracer_head();
 
       if(head->resume_addr) {
         // assert that this is a call instruction
         assert(((uint8_t*)ret_addr)[-5] == 0xE8);
+        assert(old_head.return_to_trace_when_done);
 
         if(head->tracer) {
           head->tracer->JumpFromNestedLoop((uint8_t*)ret_addr - 5); // backup the pc to the call instruction

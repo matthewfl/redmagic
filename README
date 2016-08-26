@@ -10,3 +10,11 @@ build instructions:
       pacman -S strace python2
       git submodules update --init --recursive
       ./make release
+
+
+build python:
+      cd cpython
+      ln -s ../redmagic/src/redmagic.h .
+      ln -s ../redmagic/build/libredmagic.so.* .
+      ./configure --with-pydebug --prefix=/usr
+      make

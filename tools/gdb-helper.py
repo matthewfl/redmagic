@@ -60,7 +60,7 @@ TraceJumps()
 class LocateFirstValue(gdb.Command):
 
     def __init__(self):
-        super().__init__("local-first-value", gdb.COMMAND_USER)
+        super().__init__("locate-first-value", gdb.COMMAND_USER)
 
     def invoke(self, args, from_tty):
         argv = gdb.string_to_argv(args)
