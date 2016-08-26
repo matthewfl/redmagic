@@ -928,8 +928,12 @@ mem_loc_t Tracer::merge_close_core() {
   assert(0);
 }
 
+namespace { void _nonamef() {} }
 
-void* Tracer::DeleteLastCall() {
+void* Tracer::DeleteLastCall(void *method) {
+  if((mem_loc_t)method != current_not_traced_call_addr)
+    return NULL; // this is some other method so just ignore this action
+  assert((current_not_traced_call_addr & ~0xffffffffL) == (((mem_loc_t)&_nonamef) & ~0xffffffffL));
   assert(icount - last_call_instruction < 2);
   buffer->setOffset(last_call_generated_op);
   mem_loc_t ret = buffer->getRawBuffer() + buffer->getOffset();

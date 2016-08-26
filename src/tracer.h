@@ -59,7 +59,7 @@ namespace redmagic {
     // end the current merge block
     void* EndMergeBlock();
 
-    void* DeleteLastCall();
+    void* DeleteLastCall(void *method);
 
     void set_merge_target(mem_loc_t target) {
       assert(merge_resume == 0);

@@ -717,19 +717,21 @@ void* Manager::fellthrough_branch(void *id, void *ret_addr) {
     }
   }
 
-  if(head->is_traced) {
+  if(head->tracer) {
     // there is a fallthrough without a backwards branch which means that we never
     // got to the backwards branch portion of this loop
-    assert(!head->is_compiled);
-    assert(head->tracer);
+    // assert(!head->is_compiled);
+    // assert(head->tracer);
     if(head->frame_id == branchable_frame_id) {
       return head->tracer->CheckNotSelfFellthrough();
     } else {
       // if this is at a different level in the branchable frame then it can't possible be the same instance
       // and the check self will only check the id not the branchable depth
-      return head->tracer->DeleteLastCall();
+      return head->tracer->DeleteLastCall((void*)&redmagic_fellthrough_branch);
     }
   }
+
+  assert(!head->is_compiled || head->frame_id != branchable_frame_id);
 
   return NULL;
 
