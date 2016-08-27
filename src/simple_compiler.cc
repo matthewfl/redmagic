@@ -361,8 +361,9 @@ void SimpleCompiler::ResumeBlockJump(mem_loc_t resume_pc) {
   // this will allow for it to easily write in a direct jump, as being designed now, we will have to redirect the jump through this indirection
   // so first conditional jump followed by direct jump
   // also, this will not work with concurrent threads
-  lea(x86::r9, x86::ptr(label));
-  mov(x86::r8, imm_u(0xfbfbfbfbfbfbfbfb));
+  lea(x86::r9, x86::ptr(label)); // patch address
+  mov(x86::r8, imm_u(0xfbfbfbfbfbfbfbfb)); // merge point
+
 
   jmp(imm_ptr(&red_asm_restart_trace));
 

@@ -7,7 +7,6 @@
 #endif
 
 #ifdef CONF_RELEASE_BUILD
-# define
 # define CONF_BUILD_TOGGLE(debug, release) release
 #else
 // configure the system to perform more traces to attempt to debug

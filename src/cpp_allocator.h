@@ -2,6 +2,7 @@
 #define REDMAGIC_CPP_ALLOCATOR_H_
 
 #include <memory>
+#include <cstdlib>
 
 extern "C" void *__real_malloc(size_t size);
 extern "C" void __real_free(void *ptr);
@@ -32,8 +33,13 @@ namespace redmagic {
 
     pointer allocate(size_type n, const_pointer hint = 0) {
       void* p = __real_malloc(n * sizeof(T));
-      if (!p)
+      if (!p) {
+#ifdef __EXCEPTIONS
         throw std::bad_alloc();
+#else
+        std::abort();
+#endif
+      }
       return static_cast<pointer>(p);
     }
 

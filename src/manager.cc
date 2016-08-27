@@ -995,7 +995,6 @@ namespace {
 }
 
 bool Manager::should_trace_method(void *id) {
-
   if(no_trace_methods.find(id) != no_trace_methods.end())
     return false;
 

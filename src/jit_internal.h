@@ -136,6 +136,14 @@ namespace redmagic {
     //   >
     RealMallocMap<void*, branch_info> branches;
 
+    struct merge_location_info {
+      RealMallocSet<mem_loc_t> rips;
+#ifdef CONF_MERGE_BACK_ON_RET
+      bool is_method_return = false;
+#endif
+
+    };
+
 #ifdef CONF_CHECK_MERGE_RIP
     // std::unordered_map<
     //   mem_loc_t,
@@ -204,6 +212,10 @@ namespace redmagic {
 
   struct tracer_merge_block_stack_s {
     mem_loc_t merge_head = 0; // head of linked list for this merge point
+
+#ifdef CONF_MERGE_BACK_ON_RET
+    bool method_merge = false;
+#endif
 
     tracer_merge_block_stack_s() {}
   };

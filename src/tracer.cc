@@ -753,8 +753,9 @@ void Tracer::TempEnableTrace(void *resume_pc) {
   set_pc((mem_loc_t)resume_pc);
   SimpleCompiler compiler(buffer);
   // the "normal" return address will be set to ris when this returns from the temp disabled region
-  compiler.TestRegister((mem_loc_t)&red_asm_jump_rsi, RSI, (register_t)resume_pc, &merge_block_stack.back());
+  auto wb = compiler.TestRegister((mem_loc_t)&red_asm_jump_rsi, RSI, (register_t)resume_pc, &merge_block_stack.back());
   auto written = compiler.finalize();
+  wb.replace_stump<uint64_t>(0xfafafafafafafafa, written.getRawBuffer());
   write_interrupt_block();
 }
 
@@ -1766,6 +1767,7 @@ void Tracer::evaluate_instruction() {
 #ifdef CONF_MERGE_BACK_ON_RET
       merge_block_stack.push_back(tracer_merge_block_stack_s());
       method_stack.back().corresponding_merge_block = merge_block_stack.size();
+      merge_block_stack.back().method_merge = true;
 #endif
     }
 

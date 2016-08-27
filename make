@@ -26,6 +26,7 @@ C_FLAGS = (
 )
 CXX_FLAGS = (
     '-std=c++14 '
+    '-fno-exceptions '
 )
 CXX_FLAGS_UNIT = (
     '-I ./deps/catch/ '
@@ -54,7 +55,7 @@ def release():
     C_FLAGS = C_FLAGS.replace('-O0', '-O2')
     C_FLAGS = C_FLAGS.replace('-ggdb', '')
     C_FLAGS += ' -DNDEBUG -DRED_RELEASE -fdata-sections -ffunction-sections -flto '
-    LD_FLAGS += '-flto ' #-Wl,--gc-sections -Wl,--print-gc-sections '
+    LD_FLAGS += '-flto -O2 ' #-Wl,--gc-sections -Wl,--print-gc-sections '
     clean()
     build()
     Run('mkdir -p release')
@@ -172,12 +173,13 @@ def deps():
     if not os.path.isdir('build'):
         Shell('mkdir -p build')
     if not os.path.isfile('deps/udis86/libudis86/.libs/libudis86.so') or not os.path.isfile('deps/udis86/libudis86/itab.h'):
-          Shell('cd deps/udis86 && ./autogen.sh && PYTHON=`which python2` ./configure && '
-                #"sed -i '/^CFLAGS\ =/ s/$/\ \-mgeneral\-regs\-only/' Makefile &&"
-                'make V=1', shell=True)
+          Shell('cd deps/udis86 && ./autogen.sh && PYTHON=`which python2` ./configure && ' +
+                #("sed -i '/^CFLAGS\ =/ s/$/\ \-flto/' Makefile &&" if RELEASE else '') +
+                'make V=1 CFLAGS=' + ('"-Wall -O2 -flto"' if RELEASE else '"-Wall -ggdb"')
+                , shell=True)
     if not os.path.isfile('build/asmjit/libasmjit.so'):
         Shell('mkdir -p build/asmjit')
-        asm_flags = ''  # -DASMJIT_ALLOC=test123
+        asm_flags = '\-fno-exceptions\ '  # -DASMJIT_ALLOC=test123
         cm_args = '-DASMJIT_DISABLE_COMPILER=1 -DASMJIT_CFLAGS=\'==REPLACE_ME==\' -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc'
         if RELEASE:
             Shell('cd build/asmjit && cmake ../../deps/asmjit {} -DASMJIT_RELEASE=1'.format(cm_args), shell=True)
