@@ -10,6 +10,8 @@ from fabricate import *
 
 TARGET = 'jit-test'
 
+VERSION = '1.0.0'
+
 UNIT_TARGET = 'build/unit_tests'
 
 GIT_VERSION = Shell('git describe --always --long --dirty --abbrev=12', silent=True).strip()
@@ -59,9 +61,9 @@ def release():
     clean()
     build()
     Run('mkdir -p release')
-    Run('cp build/libredmagic.so.1.0.0 release/')
+    Run('cp build/libredmagic.so.{} release/'.format(VERSION))
     Run('cp src/redmagic.h release/')
-    Run('strip --strip-unneeded -w -K redmagic_* release/libredmagic.so.1.0.0')
+    Run('strip --strip-unneeded -w -K redmagic_* release/libredmagic.so.{}'.format(VERSION))
 
 
 def clean():
@@ -87,11 +89,11 @@ def link():
     udis_libs = ' '.join(glob.glob('deps/udis86/libudis86/.libs/*.o'))
     # we are not using the compiler interface, just the assembler
     asmjit_libs = ' '.join(filter(lambda x: 'compiler' not in x, glob.glob('build/asmjit/CMakeFiles/asmjit.dir/src/asmjit/*/*.o')))
-    Run('{LD} {LD_FLAGS} -shared -fPIC -Wl,-Bsymbolic -Wl,-soname,libredmagic.so.1.0.0 -o build/libredmagic.so.1.0.0 {objs} {udis_libs} {asmjit_libs} {LIBS}'.format(
+    Run('{LD} {LD_FLAGS} -shared -fPIC -Wl,-Bsymbolic -Wl,-soname,libredmagic.so.{VERSION} -o build/libredmagic.so.{VERSION} {objs} {udis_libs} {asmjit_libs} {LIBS}'.format(
         **dict(globals(), **locals())
     ))
     after()
-    Run('{LD} -o {TARGET} build/main.o build/libredmagic.so.1.0.0 -Wl,-rpath=$ORIGIN/build/'.format(
+    Run('{LD} -o {TARGET} build/main.o build/libredmagic.so.{VERSION} -Wl,-rpath=$ORIGIN/build/'.format(
         **dict(globals(), **locals())
     ))
     after()
@@ -101,8 +103,9 @@ def compile():
         f.write('''
 #ifndef RED_BUILD_VERSION
 #define RED_BUILD_VERSION "{}"
+#define RED_OBJ_VERSION "{}"
 #endif
-        '''.format(GIT_VERSION))
+        '''.format(GIT_VERSION, VERSION))
 
     for f in glob.glob('src/*.cc'):
         Run('{CXX} {} -c {} -o {}'.format(

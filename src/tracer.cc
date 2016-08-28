@@ -822,12 +822,22 @@ void* Tracer::EndMergeBlock() {
   mem_loc_t res_addr = buffer->getRawBuffer() + buffer->getOffset();
   write_interrupt_block();
   mem_loc_t ret = merge_close_core();
-  if(ret == 0)
+  if(ret == 0) {
     ret = res_addr;
+  } else {
+    Tracer *expected = nullptr;
+    if(!free_tracer_list.compare_exchange_strong(expected, this)) {
+      // gaaaa
+      protected_malloc = false;
+      delete this;
+      protected_malloc = true;
+    }
+  }
 
   return (void*)ret;
 }
 
+// calling method has to free tracer if result is non zero
 mem_loc_t Tracer::merge_close_core() {
 #ifdef CONF_CHECK_MERGE_RIP
   mem_loc_t check_rip;
@@ -891,13 +901,13 @@ mem_loc_t Tracer::merge_close_core() {
     // head->tracer = info->tracer = nullptr;
 
     // have to free this tracer
-    Tracer *expected = nullptr;
-    if(!free_tracer_list.compare_exchange_strong(expected, this)) {
-      // gaaaa
-      protected_malloc = false;
-      delete this;
-      protected_malloc = true;
-    }
+    // Tracer *expected = nullptr;
+    // if(!free_tracer_list.compare_exchange_strong(expected, this)) {
+    //   // gaaaa
+    //   protected_malloc = false;
+    //   delete this;
+    //   protected_malloc = true;
+    // }
 
 #ifdef CONF_VERBOSE
     red_printf("merge block closing back to parent: %#016lx\n", head->trace_id);
@@ -971,6 +981,41 @@ void Tracer::continue_program(mem_loc_t resume_loc) {
   regs_struct = (struct user_regs_struct*)red_asm_resume_eval_block(&resume_struct, regs_struct);
   // assert((regs_struct->rax & ~0xff) != 0xfbfbfbfbfbfbfb00);
 }
+
+
+void Tracer::continue_program_end_self(mem_loc_t resume_loc) {
+#ifdef CONF_VERBOSE
+  red_printf("==> %#016lx (end)\n", resume_loc);
+#endif
+  struct user_regs_struct *l_regs_struct = regs_struct;
+
+
+  assert(regs_struct->rsp - TRACE_STACK_OFFSET == (register_t)l_regs_struct);
+  l_regs_struct->rsp += move_stack_by;
+  move_stack_by = 0;
+  *((register_t*)(l_regs_struct->rsp - TRACE_RESUME_ADDRESS_OFFSET)) = resume_loc;
+
+  Tracer *expected = nullptr;
+  if(!free_tracer_list.compare_exchange_strong(expected, this)) {
+    // gaaaa
+    assert(expected != this);
+    protected_malloc = false;
+    delete this;
+    protected_malloc = true;
+  }
+
+  // this should not be returning
+  red_asm_resume_eval_block(NULL, l_regs_struct);
+
+  assert(0);
+  __builtin_unreachable();
+
+  // // assert((regs_struct->rax & ~0xff) != 0xfbfbfbfbfbfbfb00);
+  // regs_struct = (struct user_regs_struct*)
+  // // assert((regs_struct->rax & ~0xff) != 0xfbfbfbfbfbfbfb00);
+}
+
+
 
 
 #define ASM_BLOCK(label)                                    \
@@ -1613,8 +1658,8 @@ void Tracer::evaluate_instruction() {
         if(method_stack.back().return_stack_pointer == -1 ||
            method_stack.back().return_stack_pointer == regs_struct->rsp + move_stack_by - sizeof(register_t)) {
           mem_loc_t merge_close = merge_close_core();
-          if(merge_close) // this might have an issue with the tracer getting free and then using it when it trys to continue the program
-            continue_program(merge_close);
+          if(merge_close)
+            continue_program_end_self(merge_close);
         }
         assert(merge_block_stack.size() < method_stack.back().corresponding_merge_block || method_stack.back().corresponding_merge_block == 0);
 #endif
@@ -1799,9 +1844,14 @@ void Tracer::evaluate_instruction() {
     assert(merge_block_stack.size() >= method_stack.back().corresponding_merge_block);
     if((method_stack.back().return_stack_pointer == -1 && regs_struct->rsp + move_stack_by - sizeof(register_t) >= run_starting_stack_pointer) ||
        method_stack.back().return_stack_pointer == regs_struct->rsp + move_stack_by - sizeof(register_t)) {
+      bool method_merge = merge_block_stack.back().method_merge;
       mem_loc_t merge_close = merge_close_core();
-      if(merge_close) // this might have an issue with the tracer getting free and then using it when it trys to continue the program
-        continue_program(merge_close);
+      if(merge_close) {
+        // we won't have the info for this merge block since it currently isn't contained on the stack
+        continue_program_end_self(merge_close);
+      } else {
+        assert(method_merge == true);
+      }
     }
     //assert(merge_block_stack.size() >= method_stack.back().corresponding_merge_block);// || method_stack.back().corresponding_merge_block == 0);
 #endif

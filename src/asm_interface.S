@@ -23,6 +23,10 @@ red_asm_resume_tracer_block_end:
 
   .global red_asm_resume_eval_block
 red_asm_resume_eval_block:
+  // check if there is somewhere we are going to stash these values
+  test %rdi, %rdi
+  jz 1f
+
   movq %rsp, 56(%rdi)
 
   movq %r12, 0(%rdi)
@@ -32,6 +36,7 @@ red_asm_resume_eval_block:
   movq %rbx, 32(%rdi)
   movq %rbp, 40(%rdi)
 
+1:
   movq %rsi, %rsp
   m_pop_all_regs
   jmpq *-TRACE_RESUME_ADDRESS_OFFSET(%rsp)

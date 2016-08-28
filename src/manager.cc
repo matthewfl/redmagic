@@ -686,13 +686,15 @@ void* Manager::fellthrough_branch(void *id, void *ret_addr) {
       l = head->tracer;
       // this will pop the head of the stack internally
       ret = l->EndTraceFallthrough();
+      // the tracer ^^^ will delete itself
+
       info->tracer = head->tracer = nullptr;
 
-      Tracer *expected = nullptr;
-      if(!free_tracer_list.compare_exchange_strong(expected, l)) {
-        // failled to save the tracer to the free list head
-        delete l;
-      }
+      // Tracer *expected = nullptr;
+      // if(!free_tracer_list.compare_exchange_strong(expected, l)) {
+      //   // failled to save the tracer to the free list head
+      //   delete l;
+      // }
 
       return ret;
     } else {

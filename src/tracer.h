@@ -93,6 +93,8 @@ namespace redmagic {
 
     // continue program might not return, so any cleanup needs to be peformed before it is called
     void continue_program(mem_loc_t);
+    // continue the program but prepare to delete self
+    void continue_program_end_self(mem_loc_t);
     void write_interrupt_block();
 
     // jump back to the normal execution of this program, no clean up
