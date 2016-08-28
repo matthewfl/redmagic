@@ -55,6 +55,8 @@ namespace redmagic {
 }
 
 
+extern "C" void red_asm_jump_rsi();
+
 
 static int udis_input_hook (ud_t *ud) {
   Tracer *t = (Tracer*)ud_get_user_opaque_data(ud);
@@ -193,14 +195,16 @@ extern "C" void red_set_temp_resume(void *resume_addr) {
   new_head->return_to_trace_when_done = true;
 }
 
-extern "C" void* red_end_trace(mem_loc_t normal_end_address) {
+extern "C" void* red_end_trace(mem_loc_t normal_end_address, mem_loc_t stack_ptr) {
   // return the address that we want to jump to
   auto head = manager->pop_tracer_stack();
   auto new_head = manager->get_tracer_head();
   assert(head.is_traced);
+  assert(head.frame_stack_ptr != -1);
   auto info = &manager->branches[head.trace_id];
   info->count_fellthrough++;
   void *ret = (void*)normal_end_address;
+  ((mem_loc_t*)stack_ptr)[-1] = head.frame_stack_ptr - stack_ptr;
   if(new_head->is_traced) {
     if(new_head->tracer) {
       new_head->tracer->JumpFromNestedLoop((void*)normal_end_address);
@@ -233,7 +237,7 @@ extern "C" void red_end_trace_ensure() {
 #endif
 }
 
-extern "C" void* red_branch_to_sub_trace(void *resume_addr, void *sub_trace_id, void* target_rip) {
+extern "C" void* red_branch_to_sub_trace(void *resume_addr, void *sub_trace_id, void* target_rip, mem_loc_t stack_ptr) {
   auto head = manager->get_tracer_head();
   assert(head->is_traced);
   assert(!head->tracer);
@@ -242,12 +246,11 @@ extern "C" void* red_branch_to_sub_trace(void *resume_addr, void *sub_trace_id, 
   assert(sub_trace_id != head->trace_id || head->frame_id != branchable_frame_id);
 
   protected_malloc = false;
-  void *ret = manager->backwards_branch(sub_trace_id, target_rip);
+  void *ret = manager->backwards_branch(sub_trace_id, target_rip, (void**)stack_ptr);
   protected_malloc = true;
   auto new_head = manager->get_tracer_head();
   new_head->return_to_trace_when_done = true;
   return ret;
-
 }
 
 extern "C" void red_asm_start_tracing(void*, void*, void*, void*);
@@ -360,6 +363,14 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
   assert(method_stack.back().return_stack_pointer == -1);
 
   run_starting_stack_pointer = regs_struct->rsp;
+
+  if(get_pc() == (mem_loc_t)&red_asm_jump_rsi) {
+    // this is only when resuming a tracer after another one exited
+    assert(regs_struct->rdi < 250); // this is the offset for the starting stack pointer (not a "real" assert, just some attempt at sanity)
+    // we offset the starting stack pointer since that controls where we end up merging back to
+    run_starting_stack_pointer += regs_struct->rdi;
+    assert(merge_resume != 0);
+  }
 
   while(true) {
     assert(before_stack == 0xdeadbeef);
@@ -745,8 +756,6 @@ void* Tracer::TempDisableTrace() {
 
   return (void*)last_call_ret_addr;
 }
-
-extern "C" void red_asm_jump_rsi();
 
 void Tracer::TempEnableTrace(void *resume_pc) {
   // check that the temp enable instruction is coming in at a expected spot, otherwise fork a new trace

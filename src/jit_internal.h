@@ -68,7 +68,7 @@ namespace redmagic {
     void* end_trace(void *id, void *ret_addr);
     void* jump_to_trace(void *id);
 
-    void* backwards_branch(void *id, void *ret_addr);
+    void* backwards_branch(void *id, void *ret_addr, void **stack_ptr);
     void* fellthrough_branch(void *id, void *ret_addr);
 
     // void ensure_not_traced();
@@ -186,6 +186,8 @@ namespace redmagic {
     bool return_to_trace_when_done = false;
 
     int32_t frame_id = -1;
+
+    mem_loc_t frame_stack_ptr = -1;
 
 
 #ifdef CONF_ESTIMATE_INSTRUCTIONS

@@ -138,6 +138,8 @@ red_asm_pop_all_regs_end:
 
   .global red_asm_jump_rsi
 red_asm_jump_rsi:
+  // this is only used to resume a tracer at a different address
+  // the address where we are expecting to resume will be loaded into rsi, so if the check fails then we will jump to that address
   jmp *%rsi
 
 // we don't need executable stack

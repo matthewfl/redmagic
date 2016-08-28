@@ -355,14 +355,14 @@ void SimpleCompiler::ResumeBlockJump(mem_loc_t resume_pc) {
   bind(label_top);
   mov(x86::ptr(x86::rsp, -TRACE_STACK_OFFSET + 216), x86::r10);
   mov(x86::ptr(x86::rsp, -TRACE_STACK_OFFSET + 224), x86::r9);
-  mov(x86::ptr(x86::rsp, -TRACE_STACK_OFFSET + 232), x86::r8);
+  mov(x86::ptr(x86::rsp, -TRACE_STACK_OFFSET + 232), x86::rcx);
   mov(x86::r10, imm_u(resume_pc));
   // TODO: have this load the address of the instruction that jumped here instead of just this block
   // this will allow for it to easily write in a direct jump, as being designed now, we will have to redirect the jump through this indirection
   // so first conditional jump followed by direct jump
   // also, this will not work with concurrent threads
   lea(x86::r9, x86::ptr(label)); // patch address
-  mov(x86::r8, imm_u(0xfbfbfbfbfbfbfbfb)); // merge point
+  mov(x86::rcx, imm_u(0xfbfbfbfbfbfbfbfb)); // merge point
 
 
   jmp(imm_ptr(&red_asm_restart_trace));
