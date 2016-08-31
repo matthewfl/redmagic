@@ -871,11 +871,11 @@ void* Manager::ensure_not_traced() {
 }
 
 void* Manager::end_branchable_frame(void *ret_addr, void **stack_ptr) {
+  auto head = get_tracer_head();
 #ifdef CONF_ALLOW_UNCLOSED_TRACES
   // check if the current trace should be finished out
   // if so, have it fallthrough and then run the corresponding block of code
   // if there are multiple traces then this method will end up getting call once per each trace that needs to be cleaned up
-  auto head = get_tracer_head();
   // assert that this return address actually came from a call instead of a tail optimized jmp, b/c life is bad...
   assert(head->is_traced || ((uint8_t*)ret_addr)[-5] == 0xE8);
   assert(ret_addr == *stack_ptr);
@@ -924,7 +924,6 @@ void* Manager::end_branchable_frame(void *ret_addr, void **stack_ptr) {
     }
   }
 #endif
-  auto head = get_tracer_head();
   assert(head->frame_stack_ptr > (mem_loc_t)stack_ptr);
   branchable_frame_id--;
   assert(head->frame_id <= branchable_frame_id);

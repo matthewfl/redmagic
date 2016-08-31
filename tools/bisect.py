@@ -15,7 +15,9 @@ def do_run(instruction_count, process, error_search, out_log):
     cnt = 0
     qu = deque([], maxlen=600)
 
-    proc = subprocess.Popen(process, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
+    inp = open('/home/matthew/developer/redmagic/tools/input')
+
+    proc = subprocess.Popen(process, stdin=inp, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
 
     try:
         for li in proc.stdout:
@@ -51,7 +53,7 @@ def main():
     error_search = ['IndexError', 'Assertion', 'SIGSEGV', 'Traceback']
     #process = '/home/matthew/developer/cpython/python -m IPython -c exit()'.split()
     # run under gdb since the program seems to change behavor depending on how it is run
-    process = ['gdb', '/home/matthew/developer/cpython/python', '--eval-command=run -m IPython -c "exit()"', '--eval-command=quit', '-batch']
+    process = ['gdb', '/home/matthew/developer/cpython/python', '--eval-command=run -m IPython', '--eval-command=quit', '-batch']
 
     try:
         while max_i - min_i > 2:
@@ -67,7 +69,7 @@ def main():
             do_run(2*max_i, process, error_search, olog)
     finally:
         print(min_i, max_i)
-        
+
 
 
 

@@ -189,7 +189,6 @@ namespace redmagic {
 
     mem_loc_t frame_stack_ptr = -1;
 
-
 #ifdef CONF_ESTIMATE_INSTRUCTIONS
     int num_backwards_loops = 0;
     uint64_t instruction_cnt_at_start = 0;

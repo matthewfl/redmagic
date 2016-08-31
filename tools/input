@@ -1,0 +1,6 @@
+123
+4 + 	5
+def u():	for i in xrange(50):		print i
+u()
+
+exit()
