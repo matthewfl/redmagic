@@ -23,6 +23,10 @@ red_asm_resume_tracer_block_end:
 
   .global red_asm_resume_eval_block
 red_asm_resume_eval_block:
+  // check if there is somewhere we are going to stash these values
+  test %rdi, %rdi
+  jz 1f
+
   movq %rsp, 56(%rdi)
 
   movq %r12, 0(%rdi)
@@ -32,6 +36,7 @@ red_asm_resume_eval_block:
   movq %rbx, 32(%rdi)
   movq %rbp, 40(%rdi)
 
+1:
   movq %rsi, %rsp
   m_pop_all_regs
   jmpq *-TRACE_RESUME_ADDRESS_OFFSET(%rsp)
@@ -66,16 +71,16 @@ red_asm_restart_trace:
   movq %r10, %rdi
   movq %r9, %rsi
   movq %rsp, %rdx
-  movq %r8, %rcx
+  //movq %r8, %rcx
 
-  // restore the origional values of r10,9,8
+  // restore the origional values of r10,9,rcx
   movq 216(%rsp), %r10
   movq 224(%rsp), %r9
-  // vvv moving the r8 register
+  // vvv moving the rcx register
   movq 232(%rsp), %rax
   movq %r10, 56(%rsp)
   movq %r9, 64(%rsp)
-  movq %rax, 72(%rsp)
+  movq %rax, 88(%rsp)
 
   call red_resume_trace@plt
   m_pop_all_regs
@@ -86,14 +91,18 @@ red_asm_restart_trace:
   // might end up returning to a another trace block
   .global red_asm_end_trace
 red_asm_end_trace:
+  movq %rsp, %rsi
+  pushq $0
   pushq %rdi
   call red_end_trace@plt
   popq %rsi
+  popq %rdi
   jmp *%rax
 
 
   .global red_asm_start_nested_trace
 red_asm_start_nested_trace:
+  movq %rsp, %rcx
   call red_branch_to_sub_trace@plt
   jmp *%rax
 

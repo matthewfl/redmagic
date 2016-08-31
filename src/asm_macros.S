@@ -3,7 +3,6 @@
   * preserve registers: rbx, rsp, rbp, r12, r13, r14, r15
   * scratch registers: rax, rdi, rsi, rdx, rcx, r8, r9, r10, r11
   *
-  * N.L represents a new line in the macro expansion
   */
 
 #include "constants.h"

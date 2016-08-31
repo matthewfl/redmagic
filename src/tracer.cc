@@ -55,6 +55,9 @@ namespace redmagic {
 }
 
 
+extern "C" void red_asm_jump_rsi_temp_enable();
+extern "C" void red_asm_jump_rsi_resume_trace();
+
 
 static int udis_input_hook (ud_t *ud) {
   Tracer *t = (Tracer*)ud_get_user_opaque_data(ud);
@@ -193,14 +196,16 @@ extern "C" void red_set_temp_resume(void *resume_addr) {
   new_head->return_to_trace_when_done = true;
 }
 
-extern "C" void* red_end_trace(mem_loc_t normal_end_address) {
+extern "C" void* red_end_trace(mem_loc_t normal_end_address, mem_loc_t stack_ptr) {
   // return the address that we want to jump to
   auto head = manager->pop_tracer_stack();
   auto new_head = manager->get_tracer_head();
   assert(head.is_traced);
+  assert(head.frame_stack_ptr != -1);
   auto info = &manager->branches[head.trace_id];
   info->count_fellthrough++;
   void *ret = (void*)normal_end_address;
+  ((mem_loc_t*)stack_ptr)[-1] = head.frame_stack_ptr - stack_ptr;
   if(new_head->is_traced) {
     if(new_head->tracer) {
       new_head->tracer->JumpFromNestedLoop((void*)normal_end_address);
@@ -233,7 +238,7 @@ extern "C" void red_end_trace_ensure() {
 #endif
 }
 
-extern "C" void* red_branch_to_sub_trace(void *resume_addr, void *sub_trace_id, void* target_rip) {
+extern "C" void* red_branch_to_sub_trace(void *resume_addr, void *sub_trace_id, void* target_rip, mem_loc_t stack_ptr) {
   auto head = manager->get_tracer_head();
   assert(head->is_traced);
   assert(!head->tracer);
@@ -242,12 +247,11 @@ extern "C" void* red_branch_to_sub_trace(void *resume_addr, void *sub_trace_id, 
   assert(sub_trace_id != head->trace_id || head->frame_id != branchable_frame_id);
 
   protected_malloc = false;
-  void *ret = manager->backwards_branch(sub_trace_id, target_rip);
+  void *ret = manager->backwards_branch(sub_trace_id, target_rip, (void**)stack_ptr);
   protected_malloc = true;
   auto new_head = manager->get_tracer_head();
   new_head->return_to_trace_when_done = true;
   return ret;
-
 }
 
 extern "C" void red_asm_start_tracing(void*, void*, void*, void*);
@@ -360,6 +364,14 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
   assert(method_stack.back().return_stack_pointer == -1);
 
   run_starting_stack_pointer = regs_struct->rsp;
+
+  if(get_pc() == (mem_loc_t)&red_asm_jump_rsi_resume_trace) {
+    // this is only when resuming a tracer after another one exited
+    assert(regs_struct->rdi < 250); // this is the offset for the starting stack pointer (not a "real" assert, just some attempt at sanity)
+    // we offset the starting stack pointer since that controls where we end up merging back to
+    run_starting_stack_pointer += regs_struct->rdi;
+    assert(merge_resume != 0);
+  }
 
   while(true) {
     assert(before_stack == 0xdeadbeef);
@@ -728,7 +740,16 @@ void* Tracer::EndTraceEnsure() {
 
 
 void* Tracer::TempDisableTrace() {
-  assert(current_not_traced_call_addr == (mem_loc_t)&redmagic_temp_disable);
+  if(current_not_traced_call_addr != (mem_loc_t)&redmagic_temp_disable) {
+    // then this must be inside of some not traced call
+    // but we still have to behave the same
+    auto head = manager->get_tracer_head();
+    head->is_temp_disabled = true;
+    assert(head->resume_addr == nullptr);
+    manager->push_tracer_stack();
+    return NULL;
+  }
+  //assert(current_not_traced_call_addr == (mem_loc_t)&redmagic_temp_disable);
   assert(icount - last_call_instruction < 2);
   buffer->setOffset(last_call_generated_op);
   SimpleCompiler compiler(buffer);
@@ -746,22 +767,27 @@ void* Tracer::TempDisableTrace() {
   return (void*)last_call_ret_addr;
 }
 
-extern "C" void red_asm_jump_rsi();
-
 void Tracer::TempEnableTrace(void *resume_pc) {
   // check that the temp enable instruction is coming in at a expected spot, otherwise fork a new trace
   set_pc((mem_loc_t)resume_pc);
   SimpleCompiler compiler(buffer);
   // the "normal" return address will be set to ris when this returns from the temp disabled region
-  auto wb = compiler.TestRegister((mem_loc_t)&red_asm_jump_rsi, RSI, (register_t)resume_pc, &merge_block_stack.back());
+  auto wb = compiler.TestRegister((mem_loc_t)&red_asm_jump_rsi_temp_enable, RSI, (register_t)resume_pc, &merge_block_stack.back());
   auto written = compiler.finalize();
   wb.replace_stump<uint64_t>(0xfafafafafafafafa, written.getRawBuffer());
   write_interrupt_block();
 }
 
 void Tracer::JumpFromNestedLoop(void *resume_pc) {
-  // same code where we check the rsi register for where we expect to resume the trace from
-  TempEnableTrace(resume_pc);
+  // this code is very similar to the above, todo:? make into function
+  // TempEnableTrace(resume_pc);
+  set_pc((mem_loc_t)resume_pc);
+  SimpleCompiler compiler(buffer);
+  // the "normal" return address will be set to ris when this returns from the temp disabled region
+  auto wb = compiler.TestRegister((mem_loc_t)&red_asm_jump_rsi_resume_trace, RSI, (register_t)resume_pc, &merge_block_stack.back());
+  auto written = compiler.finalize();
+  wb.replace_stump<uint64_t>(0xfafafafafafafafa, written.getRawBuffer());
+  write_interrupt_block();
 }
 
 extern "C" void red_asm_start_nested_trace();
@@ -786,7 +812,10 @@ void Tracer::JumpToNestedLoop(void *nested_trace_id) {
 }
 
 void* Tracer::ReplaceIsTracedCall() {
-  assert(current_not_traced_call_addr == (mem_loc_t)&redmagic_is_traced);
+  // if this wasn't the most recent call then don't delete
+  // also returning null will make this statement behave in a false way
+  if(current_not_traced_call_addr != (mem_loc_t)&redmagic_is_traced)
+    return NULL;
   assert(icount - last_call_instruction < 2);
   buffer->setOffset(last_call_generated_op);
   SimpleCompiler compiler(buffer);
@@ -822,12 +851,22 @@ void* Tracer::EndMergeBlock() {
   mem_loc_t res_addr = buffer->getRawBuffer() + buffer->getOffset();
   write_interrupt_block();
   mem_loc_t ret = merge_close_core();
-  if(ret == 0)
+  if(ret == 0) {
     ret = res_addr;
+  } else {
+    Tracer *expected = nullptr;
+    if(!free_tracer_list.compare_exchange_strong(expected, this)) {
+      // gaaaa
+      protected_malloc = false;
+      delete this;
+      protected_malloc = true;
+    }
+  }
 
   return (void*)ret;
 }
 
+// calling method has to free tracer if result is non zero
 mem_loc_t Tracer::merge_close_core() {
 #ifdef CONF_CHECK_MERGE_RIP
   mem_loc_t check_rip;
@@ -891,13 +930,13 @@ mem_loc_t Tracer::merge_close_core() {
     // head->tracer = info->tracer = nullptr;
 
     // have to free this tracer
-    Tracer *expected = nullptr;
-    if(!free_tracer_list.compare_exchange_strong(expected, this)) {
-      // gaaaa
-      protected_malloc = false;
-      delete this;
-      protected_malloc = true;
-    }
+    // Tracer *expected = nullptr;
+    // if(!free_tracer_list.compare_exchange_strong(expected, this)) {
+    //   // gaaaa
+    //   protected_malloc = false;
+    //   delete this;
+    //   protected_malloc = true;
+    // }
 
 #ifdef CONF_VERBOSE
     red_printf("merge block closing back to parent: %#016lx\n", head->trace_id);
@@ -971,6 +1010,41 @@ void Tracer::continue_program(mem_loc_t resume_loc) {
   regs_struct = (struct user_regs_struct*)red_asm_resume_eval_block(&resume_struct, regs_struct);
   // assert((regs_struct->rax & ~0xff) != 0xfbfbfbfbfbfbfb00);
 }
+
+
+void Tracer::continue_program_end_self(mem_loc_t resume_loc) {
+#ifdef CONF_VERBOSE
+  red_printf("==> %#016lx (end)\n", resume_loc);
+#endif
+  struct user_regs_struct *l_regs_struct = regs_struct;
+
+
+  assert(regs_struct->rsp - TRACE_STACK_OFFSET == (register_t)l_regs_struct);
+  l_regs_struct->rsp += move_stack_by;
+  move_stack_by = 0;
+  *((register_t*)(l_regs_struct->rsp - TRACE_RESUME_ADDRESS_OFFSET)) = resume_loc;
+
+  Tracer *expected = nullptr;
+  if(!free_tracer_list.compare_exchange_strong(expected, this)) {
+    // gaaaa
+    assert(expected != this);
+    protected_malloc = false;
+    delete this;
+    protected_malloc = true;
+  }
+
+  // this should not be returning
+  red_asm_resume_eval_block(NULL, l_regs_struct);
+
+  assert(0);
+  __builtin_unreachable();
+
+  // // assert((regs_struct->rax & ~0xff) != 0xfbfbfbfbfbfbfb00);
+  // regs_struct = (struct user_regs_struct*)
+  // // assert((regs_struct->rax & ~0xff) != 0xfbfbfbfbfbfbfb00);
+}
+
+
 
 
 #define ASM_BLOCK(label)                                    \
@@ -1613,8 +1687,8 @@ void Tracer::evaluate_instruction() {
         if(method_stack.back().return_stack_pointer == -1 ||
            method_stack.back().return_stack_pointer == regs_struct->rsp + move_stack_by - sizeof(register_t)) {
           mem_loc_t merge_close = merge_close_core();
-          if(merge_close) // this might have an issue with the tracer getting free and then using it when it trys to continue the program
-            continue_program(merge_close);
+          if(merge_close)
+            continue_program_end_self(merge_close);
         }
         assert(merge_block_stack.size() < method_stack.back().corresponding_merge_block || method_stack.back().corresponding_merge_block == 0);
 #endif
@@ -1799,9 +1873,14 @@ void Tracer::evaluate_instruction() {
     assert(merge_block_stack.size() >= method_stack.back().corresponding_merge_block);
     if((method_stack.back().return_stack_pointer == -1 && regs_struct->rsp + move_stack_by - sizeof(register_t) >= run_starting_stack_pointer) ||
        method_stack.back().return_stack_pointer == regs_struct->rsp + move_stack_by - sizeof(register_t)) {
+      bool method_merge = merge_block_stack.back().method_merge;
       mem_loc_t merge_close = merge_close_core();
-      if(merge_close) // this might have an issue with the tracer getting free and then using it when it trys to continue the program
-        continue_program(merge_close);
+      if(merge_close) {
+        // we won't have the info for this merge block since it currently isn't contained on the stack
+        continue_program_end_self(merge_close);
+      } else {
+        assert(method_merge == true);
+      }
     }
     //assert(merge_block_stack.size() >= method_stack.back().corresponding_merge_block);// || method_stack.back().corresponding_merge_block == 0);
 #endif

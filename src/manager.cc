@@ -61,60 +61,59 @@ public:
 };
 
 
-extern "C" void* red_user_force_begin_trace(void *id, void *ret_addr) {
+extern "C" void* red_user_force_begin_trace(void *id, void *ret_addr, void **stack_ptr) {
   UnprotectMalloc upm;
   return manager->begin_trace(id, ret_addr);
 }
 
-extern "C" void* red_user_force_end_trace(void *id, void *ret_addr) {
+extern "C" void* red_user_force_end_trace(void *id, void *ret_addr, void **stack_ptr) {
   UnprotectMalloc upm;
   return manager->end_trace(id, ret_addr);
 }
 
-extern "C" void* red_user_force_jump_to_trace(void *id, void *ret_addr) {
+extern "C" void* red_user_force_jump_to_trace(void *id, void *ret_addr, void **stack_ptr) {
   UnprotectMalloc upm;
   return manager->jump_to_trace(id);
 }
 
-extern "C" void* red_user_backwards_branch(void *id, void *ret_addr) {
+extern "C" void* red_user_backwards_branch(void *id, void *ret_addr, void **stack_ptr) {
   UnprotectMalloc upm;
-  return manager->backwards_branch(id, ret_addr);
+  return manager->backwards_branch(id, ret_addr, stack_ptr);
 }
 
-extern "C" void* red_user_fellthrough_branch(void *id, void *ret_addr) {
+extern "C" void* red_user_fellthrough_branch(void *id, void *ret_addr, void **stack_ptr) {
   UnprotectMalloc upm;
-  return manager->fellthrough_branch(id, ret_addr);
+  return manager->fellthrough_branch(id, ret_addr, stack_ptr);
 }
 
-extern "C" void* red_user_ensure_not_traced(void *_, void *ret_addr) {
-  // TODO:
+extern "C" void* red_user_ensure_not_traced(void *_, void *ret_addr, void **stack_ptr) {
   return manager->ensure_not_traced();
 }
 
-extern "C" void* red_user_temp_disable(void *_, void *ret_addr) {
+extern "C" void* red_user_temp_disable(void *_, void *ret_addr, void **stack_ptr) {
   UnprotectMalloc upm;
   return manager->temp_disable(ret_addr);
   //return NULL;
 }
 
-extern "C" void* red_user_is_traced(void *_, void *ret_addr) {
+extern "C" void* red_user_is_traced(void *_, void *ret_addr, void **stack_ptr) {
   UnprotectMalloc upm;
   return manager->is_traced_call();
 }
 
-extern "C" void* red_user_temp_enable(void *_, void *ret_addr) {
+extern "C" void* red_user_temp_enable(void *_, void *ret_addr, void **stack_ptr) {
   UnprotectMalloc upm;
   return manager->temp_enable(ret_addr);
   //assert(0);
   //return NULL;
 }
 
-extern "C" void* red_user_begin_merge_block(void *_, void *ret_addr) {
+extern "C" void* red_user_begin_merge_block(void *_, void *ret_addr, void **stack_ptr) {
   UnprotectMalloc upm;
   return manager->begin_merge_block();
 }
 
-extern "C" void* red_user_end_merge_block(void *_, void *ret_addr) {
+extern "C" void* red_user_end_merge_block(void *_, void *ret_addr, void **stack_ptr) {
   UnprotectMalloc upm;
   return manager->end_merge_block();
 }
@@ -505,7 +504,7 @@ void* Manager::jump_to_trace(void *id) {
   return NULL;
 }
 
-void* Manager::backwards_branch(void *id, void *ret_addr) {
+void* Manager::backwards_branch(void *id, void *ret_addr, void **stack_ptr) {
   // ignore
   if(id == nullptr)
     return NULL;
@@ -567,6 +566,7 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
       head->tracer->JumpToNestedLoop(id);
     }
     new_head = push_tracer_stack();
+    new_head->frame_stack_ptr = (mem_loc_t)stack_ptr;
     head = &threadl_tracer_stack[threadl_tracer_stack.size() - 2];
     if(head->tracer) {
       new_head->return_to_trace_when_done = true;
@@ -668,7 +668,7 @@ void* Manager::backwards_branch(void *id, void *ret_addr) {
 
 }
 
-void* Manager::fellthrough_branch(void *id, void *ret_addr) {
+void* Manager::fellthrough_branch(void *id, void *ret_addr, void **stack_ptr) {
   // ignore
   if(id == nullptr)
     return NULL;
@@ -686,13 +686,15 @@ void* Manager::fellthrough_branch(void *id, void *ret_addr) {
       l = head->tracer;
       // this will pop the head of the stack internally
       ret = l->EndTraceFallthrough();
+      // the tracer ^^^ will delete itself
+
       info->tracer = head->tracer = nullptr;
 
-      Tracer *expected = nullptr;
-      if(!free_tracer_list.compare_exchange_strong(expected, l)) {
-        // failled to save the tracer to the free list head
-        delete l;
-      }
+      // Tracer *expected = nullptr;
+      // if(!free_tracer_list.compare_exchange_strong(expected, l)) {
+      //   // failled to save the tracer to the free list head
+      //   delete l;
+      // }
 
       return ret;
     } else {
@@ -702,6 +704,7 @@ void* Manager::fellthrough_branch(void *id, void *ret_addr) {
       // we have to pop this frame since we weren't being traced and there is nothing that will do it for us
       auto old_head = pop_tracer_stack();
       auto new_head = get_tracer_head();
+      ((mem_loc_t*)stack_ptr)[-1] = old_head.frame_stack_ptr - (mem_loc_t)stack_ptr;
       if(new_head->resume_addr) {
         assert(old_head.return_to_trace_when_done);
         if(new_head->tracer) {
@@ -734,22 +737,25 @@ void* Manager::fellthrough_branch(void *id, void *ret_addr) {
   assert(!head->is_compiled || head->frame_id != branchable_frame_id);
 
   return NULL;
-
 }
 
 void* Manager::temp_disable(void *ret_addr) {
   temp_disable_last_addr = ret_addr;
   auto head = get_tracer_head();
   assert(!head->is_temp_disabled);
-  head->is_temp_disabled = true;
+
   //head->d_ret = ret_addr;
   void *ret = NULL;
-  assert(!head->is_traced || head->tracer);
+
+  //assert(!head->is_traced || head->tracer);
+  // ^^^ due to the tracer sometimes
+
   if(head->tracer && !head->tracer->did_abort) {
     // this will push the stack
     ret = head->tracer->TempDisableTrace();
   } else {
     assert(!head->resume_addr);
+    head->is_temp_disabled = true;
     push_tracer_stack();
   }
   return ret;
@@ -766,7 +772,7 @@ void* Manager::temp_enable(void *ret_addr) {
   //head->is_temp_disabled = false;
   void *ret = NULL;
   //head->d_ret = nullptr;
-  if(head->tracer && !head->tracer->did_abort) {
+  if(old_head.return_to_trace_when_done && head->tracer && !head->tracer->did_abort) {
     head->tracer->TempEnableTrace(ret_addr);
   }
   if(head->resume_addr != nullptr) {
@@ -918,8 +924,10 @@ void* Manager::end_branchable_frame(void *ret_addr, void **stack_ptr) {
     }
   }
 #endif
+  auto head = get_tracer_head();
+  assert(head->frame_stack_ptr > (mem_loc_t)stack_ptr);
   branchable_frame_id--;
-  assert(get_tracer_head()->frame_id <= branchable_frame_id);
+  assert(head->frame_id <= branchable_frame_id);
   return NULL;
 }
 
