@@ -69,7 +69,7 @@ namespace redmagic {
     void* jump_to_trace(void *id);
 
     void* backwards_branch(void *id, void *ret_addr, void **stack_ptr);
-    void* fellthrough_branch(void *id, void *ret_addr);
+    void* fellthrough_branch(void *id, void *ret_addr, void **stack_ptr);
 
     // void ensure_not_traced();
 

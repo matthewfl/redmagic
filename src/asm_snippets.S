@@ -136,11 +136,16 @@ red_asm_pop_all_regs_start:
   m_pop_all_regs
 red_asm_pop_all_regs_end:
 
-  .global red_asm_jump_rsi
-red_asm_jump_rsi:
+  .global red_asm_jump_rsi_temp_enable
+red_asm_jump_rsi_temp_enable:
+  jmp *%rsi
+
+  .global red_asm_jump_rsi_resume_trace
+red_asm_jump_rsi_resume_trace:
   // this is only used to resume a tracer at a different address
   // the address where we are expecting to resume will be loaded into rsi, so if the check fails then we will jump to that address
   jmp *%rsi
 
-// we don't need executable stack
+
+  // we don't need executable stack
   .section .note.GNU-stack,"",%progbits

@@ -83,11 +83,10 @@ extern "C" void* red_user_backwards_branch(void *id, void *ret_addr, void **stac
 
 extern "C" void* red_user_fellthrough_branch(void *id, void *ret_addr, void **stack_ptr) {
   UnprotectMalloc upm;
-  return manager->fellthrough_branch(id, ret_addr);
+  return manager->fellthrough_branch(id, ret_addr, stack_ptr);
 }
 
 extern "C" void* red_user_ensure_not_traced(void *_, void *ret_addr, void **stack_ptr) {
-  // TODO:
   return manager->ensure_not_traced();
 }
 
@@ -669,7 +668,7 @@ void* Manager::backwards_branch(void *id, void *ret_addr, void **stack_ptr) {
 
 }
 
-void* Manager::fellthrough_branch(void *id, void *ret_addr) {
+void* Manager::fellthrough_branch(void *id, void *ret_addr, void **stack_ptr) {
   // ignore
   if(id == nullptr)
     return NULL;
@@ -705,6 +704,7 @@ void* Manager::fellthrough_branch(void *id, void *ret_addr) {
       // we have to pop this frame since we weren't being traced and there is nothing that will do it for us
       auto old_head = pop_tracer_stack();
       auto new_head = get_tracer_head();
+      ((mem_loc_t*)stack_ptr)[-1] = old_head.frame_stack_ptr - (mem_loc_t)stack_ptr;
       if(new_head->resume_addr) {
         assert(old_head.return_to_trace_when_done);
         if(new_head->tracer) {
@@ -737,22 +737,25 @@ void* Manager::fellthrough_branch(void *id, void *ret_addr) {
   assert(!head->is_compiled || head->frame_id != branchable_frame_id);
 
   return NULL;
-
 }
 
 void* Manager::temp_disable(void *ret_addr) {
   temp_disable_last_addr = ret_addr;
   auto head = get_tracer_head();
   assert(!head->is_temp_disabled);
-  head->is_temp_disabled = true;
+
   //head->d_ret = ret_addr;
   void *ret = NULL;
-  assert(!head->is_traced || head->tracer);
+
+  //assert(!head->is_traced || head->tracer);
+  // ^^^ due to the tracer sometimes
+
   if(head->tracer && !head->tracer->did_abort) {
     // this will push the stack
     ret = head->tracer->TempDisableTrace();
   } else {
     assert(!head->resume_addr);
+    head->is_temp_disabled = true;
     push_tracer_stack();
   }
   return ret;
@@ -769,7 +772,7 @@ void* Manager::temp_enable(void *ret_addr) {
   //head->is_temp_disabled = false;
   void *ret = NULL;
   //head->d_ret = nullptr;
-  if(head->tracer && !head->tracer->did_abort) {
+  if(old_head.return_to_trace_when_done && head->tracer && !head->tracer->did_abort) {
     head->tracer->TempEnableTrace(ret_addr);
   }
   if(head->resume_addr != nullptr) {
@@ -921,8 +924,10 @@ void* Manager::end_branchable_frame(void *ret_addr, void **stack_ptr) {
     }
   }
 #endif
+  auto head = get_tracer_head();
+  assert(head->frame_stack_ptr > (mem_loc_t)stack_ptr);
   branchable_frame_id--;
-  assert(get_tracer_head()->frame_id <= branchable_frame_id);
+  assert(head->frame_id <= branchable_frame_id);
   return NULL;
 }
 

@@ -55,7 +55,8 @@ namespace redmagic {
 }
 
 
-extern "C" void red_asm_jump_rsi();
+extern "C" void red_asm_jump_rsi_temp_enable();
+extern "C" void red_asm_jump_rsi_resume_trace();
 
 
 static int udis_input_hook (ud_t *ud) {
@@ -364,7 +365,7 @@ void Tracer::Run(struct user_regs_struct *other_stack) {
 
   run_starting_stack_pointer = regs_struct->rsp;
 
-  if(get_pc() == (mem_loc_t)&red_asm_jump_rsi) {
+  if(get_pc() == (mem_loc_t)&red_asm_jump_rsi_resume_trace) {
     // this is only when resuming a tracer after another one exited
     assert(regs_struct->rdi < 250); // this is the offset for the starting stack pointer (not a "real" assert, just some attempt at sanity)
     // we offset the starting stack pointer since that controls where we end up merging back to
@@ -739,7 +740,16 @@ void* Tracer::EndTraceEnsure() {
 
 
 void* Tracer::TempDisableTrace() {
-  assert(current_not_traced_call_addr == (mem_loc_t)&redmagic_temp_disable);
+  if(current_not_traced_call_addr != (mem_loc_t)&redmagic_temp_disable) {
+    // then this must be inside of some not traced call
+    // but we still have to behave the same
+    auto head = manager->get_tracer_head();
+    head->is_temp_disabled = true;
+    assert(head->resume_addr == nullptr);
+    manager->push_tracer_stack();
+    return NULL;
+  }
+  //assert(current_not_traced_call_addr == (mem_loc_t)&redmagic_temp_disable);
   assert(icount - last_call_instruction < 2);
   buffer->setOffset(last_call_generated_op);
   SimpleCompiler compiler(buffer);
@@ -762,15 +772,22 @@ void Tracer::TempEnableTrace(void *resume_pc) {
   set_pc((mem_loc_t)resume_pc);
   SimpleCompiler compiler(buffer);
   // the "normal" return address will be set to ris when this returns from the temp disabled region
-  auto wb = compiler.TestRegister((mem_loc_t)&red_asm_jump_rsi, RSI, (register_t)resume_pc, &merge_block_stack.back());
+  auto wb = compiler.TestRegister((mem_loc_t)&red_asm_jump_rsi_temp_enable, RSI, (register_t)resume_pc, &merge_block_stack.back());
   auto written = compiler.finalize();
   wb.replace_stump<uint64_t>(0xfafafafafafafafa, written.getRawBuffer());
   write_interrupt_block();
 }
 
 void Tracer::JumpFromNestedLoop(void *resume_pc) {
-  // same code where we check the rsi register for where we expect to resume the trace from
-  TempEnableTrace(resume_pc);
+  // this code is very similar to the above, todo:? make into function
+  // TempEnableTrace(resume_pc);
+  set_pc((mem_loc_t)resume_pc);
+  SimpleCompiler compiler(buffer);
+  // the "normal" return address will be set to ris when this returns from the temp disabled region
+  auto wb = compiler.TestRegister((mem_loc_t)&red_asm_jump_rsi_resume_trace, RSI, (register_t)resume_pc, &merge_block_stack.back());
+  auto written = compiler.finalize();
+  wb.replace_stump<uint64_t>(0xfafafafafafafafa, written.getRawBuffer());
+  write_interrupt_block();
 }
 
 extern "C" void red_asm_start_nested_trace();
@@ -795,7 +812,10 @@ void Tracer::JumpToNestedLoop(void *nested_trace_id) {
 }
 
 void* Tracer::ReplaceIsTracedCall() {
-  assert(current_not_traced_call_addr == (mem_loc_t)&redmagic_is_traced);
+  // if this wasn't the most recent call then don't delete
+  // also returning null will make this statement behave in a false way
+  if(current_not_traced_call_addr != (mem_loc_t)&redmagic_is_traced)
+    return NULL;
   assert(icount - last_call_instruction < 2);
   buffer->setOffset(last_call_generated_op);
   SimpleCompiler compiler(buffer);

@@ -29,7 +29,7 @@
 
 // makes it print all the instructions processed and extra info
 #ifdef CONF_DEBUG_BUILD
-# define CONF_VERBOSE
+//# define CONF_VERBOSE
 #endif
 
 // support aborting the system after some fixed number of instruction have been processed, see tools/bisect for debugging with this
