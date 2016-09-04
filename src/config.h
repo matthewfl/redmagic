@@ -46,10 +46,10 @@
 
 
 // using timers in addition to number of times it loops to determine what to trace
-#ifdef CONF_RELEASE_BUILD
-# define CONF_USE_TIMERS
-#endif
-#define CONF_TIMER_DELAY_MS CONF_BUILD_TOGGLE(0, 5000)
+//#ifdef CONF_RELEASE_BUILD
+#define CONF_USE_TIMERS
+//#endif
+#define CONF_TIMER_DELAY_MS CONF_BUILD_TOGGLE(10000, 60000)
 
 #define CONF_ESTIMATE_INSTRUCTIONS
 

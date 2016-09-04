@@ -8,6 +8,9 @@
 
 #include <new>
 
+
+#include "jit_internal.h"
+
 // we can't direclty use allocators when we are tracing since it might screw with their internal states
 
 // use mmap and mprotect to wrap all alloc options
@@ -81,7 +84,7 @@ extern "C" void *__wrap_malloc(size_t size) {
   BUFFER_SIZES(FIND_BUFFER);
 
  use_real_malloc:
-  printf("============trying to use real malloc\n");
+  red_printf("============trying to use real malloc\n");
   abort();
 
   return __real_malloc(size);
@@ -107,8 +110,10 @@ extern "C" void __wrap_free(void *ptr) {
 
   BUFFER_SIZES(FREE_BUFFER);
 
+#ifdef CONF_VERBOSE
   if(protected_malloc)
-    printf("more wtf\n");
+    red_printf("more wtf\n");
+#endif
   __real_free(ptr);
 }
 
