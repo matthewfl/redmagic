@@ -51,6 +51,11 @@
 //#endif
 #define CONF_TIMER_DELAY_MS CONF_BUILD_TOGGLE(10000, 60000)
 
+// Takes method which is num milliseconds, num instructions
+#define CONF_TRACE_INSTRUCTION_LIMIT_PER_TIME(X)  \
+  X(1000, 100000)                                 \
+  X(60000, 10000000)
+
 #define CONF_ESTIMATE_INSTRUCTIONS
 
 // instead of taking a trace all the way to the bottom of the loop, attempt to merge back at the ret inside of a method
@@ -60,6 +65,6 @@
 //#define CONF_CHECK_RET_ADDRESS
 
 // check the instruction pointer when performing a merge close block
-#define CONF_CHECK_MERGE_RIP
+//#define CONF_CHECK_MERGE_RIP
 
 #endif // REDMAGIC_CONFIG_H_

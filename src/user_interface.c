@@ -1,6 +1,6 @@
 
 // useful for compiling against while not causing any "problems"
-#define DISABLE_REDMAGIC
+//#define DISABLE_REDMAGIC
 
 // this is define in a .c file instead of .s so that we can
 // interface with the -fPIC methods & macros, also need to have @plt at the end

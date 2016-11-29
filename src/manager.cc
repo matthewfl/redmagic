@@ -44,6 +44,8 @@ namespace redmagic {
 #ifdef CONF_GLOBAL_ABORT
   extern long global_icount_abort;
 #endif
+
+  extern long global_icount;
 }
 
 class UnprotectMalloc {
@@ -635,6 +637,20 @@ void* Manager::backwards_branch(void *id, void *ret_addr, void **stack_ptr) {
       should_perform_trace = false;
     }
   }
+
+#define TRACE_SPEED_LIMIT(time, cnt)            \
+  if(time_ms(time_delta(speed_limit_time ## time, now)) >= time)  { \
+    speed_limit_time ## time = now;                                 \
+    speed_limit_last_icount ## time = global_icount;                \
+  } else if(speed_limit_last_icount ## time + cnt < global_icount) { \
+    should_perform_trace = false;                                    \
+  }
+
+  CONF_TRACE_INSTRUCTION_LIMIT_PER_TIME(TRACE_SPEED_LIMIT)
+
+#undef TRACE_SPEED_LIMIT
+
+
 #endif
 // #ifdef CONF_ESTIMATE_INSTRUCTIONS
 //   if(info->avg_observed_instructions == 0) {
@@ -924,7 +940,7 @@ void* Manager::end_branchable_frame(void *ret_addr, void **stack_ptr) {
     }
   }
 #endif
-  assert(head->frame_stack_ptr > (mem_loc_t)stack_ptr);
+  assert(head->frame_stack_ptr >= (mem_loc_t)stack_ptr);
   branchable_frame_id--;
   assert(head->frame_id <= branchable_frame_id);
   return NULL;
@@ -1018,9 +1034,6 @@ bool Manager::should_trace_method(void *id) {
   return true;
 }
 
-namespace redmagic {
-  extern long global_icount;
-}
 
 void Manager::print_info() {
   UnprotectMalloc upm;

@@ -1,0 +1,6 @@
+#!/usr/bin/env expect
+
+spawn gdb "/home/matthew/.virtualenvs/redmagic/bin/python" "--eval-command=run -m IPython" "--eval-command=quit" "-batch"
+
+expect "In \[1\]:"
+send "\n"

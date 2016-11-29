@@ -2026,7 +2026,22 @@ void Tracer::replace_rip_instruction() {
     // if there was a blacklist what instructions should go on it?
 
 
-    assert(0);
+#ifndef CONF_VERBOSE
+    // then nothing would have printed so figure out what to print and print that
+    ud_set_syntax(&disassm, UD_SYN_ATT);
+    set_pc(ud_insn_off(&disassm));
+    // redo the disassemble
+    ud_disassemble(&disassm);
+    red_printf("[%10lu %8i %#016lx] \t%-38s %-20s %s\n", global_icount, icount, ud_insn_off(&disassm), ud_insn_asm(&disassm), ud_insn_hex(&disassm), "??");
+#endif
+
+
+    red_printf("failed to replace rip instruction\n");
+
+
+    manager->print_info();
+
+    ::abort();
   }
   }
 }

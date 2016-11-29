@@ -168,6 +168,15 @@ namespace redmagic {
     // tbb::concurrent_unordered_map<uint64_t, branch_info> branches;
     // tbb::concurrent_unordered_set<uint64_t> no_trace_methods;
 
+#ifdef CONF_USE_TIMERS
+#define TRACE_SPEED_LIMIT(time, cnt)              \
+    timespec speed_limit_time ## time = {0, 0} ;  \
+    long speed_limit_last_icount ## time = 0;
+
+    CONF_TRACE_INSTRUCTION_LIMIT_PER_TIME(TRACE_SPEED_LIMIT);
+#undef TRACE_SPEED_LIMIT
+#endif
+
     friend class Tracer;
   };
 
