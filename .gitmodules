@@ -1,6 +1,6 @@
 [submodule "deps/udis86"]
 	path = deps/udis86
-	url = git@10.7.0.1:u/mfl/udis86
+	url = git@github.com:matthewfl/udis86.git
 [submodule "deps/asmjit"]
 	path = deps/asmjit
-	url = git@10.7.0.1:u/mfl/asmjit
+	url = git@github.com:matthewfl/asmjit.git
